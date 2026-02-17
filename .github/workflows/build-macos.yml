@@ -1,0 +1,76 @@
+name: build-macos
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            arch: x86_64
+          - os: macos-14
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller dmgbuild
+          pip install -e .
+
+      - name: Build .app with PyInstaller
+        run: |
+          pyinstaller --noconfirm --windowed \
+            --name "NuclearReactorControlRoom" \
+            --collect-all pygame \
+            run_control_room.py
+
+      - name: Build DMG
+        run: |
+          python - <<'PY'
+          import os
+          import dmgbuild
+
+          app = 'dist/NuclearReactorControlRoom.app'
+          assert os.path.isdir(app), f"Missing {app}"
+
+          settings = {
+              'volume_name': f'NRCR-{os.environ.get("ARCH","unknown")}',
+              'format': 'UDZO',
+              'files': [app],
+              'symlinks': {'Applications': '/Applications'},
+              'icon_locations': {'NuclearReactorControlRoom.app': (140, 120), 'Applications': (420, 120)},
+              'window_rect': ((200, 200), (600, 320)),
+              'default_view': 'icon-view',
+          }
+
+          dmgbuild.build_dmg(
+              filename=f"dist/NRCR-{os.environ.get('ARCH','unknown')}.dmg",
+              volume_name=settings['volume_name'],
+              settings=settings,
+          )
+          print('DMG built')
+          PY
+        env:
+          ARCH: ${{ matrix.arch }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NRCR-${{ matrix.arch }}
+          path: dist/NRCR-${{ matrix.arch }}.dmg
