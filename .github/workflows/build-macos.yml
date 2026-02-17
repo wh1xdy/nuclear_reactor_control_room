@@ -7,7 +7,7 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  build-app:
     strategy:
       fail-fast: false
       matrix:
@@ -30,7 +30,7 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller dmgbuild
+          pip install pyinstaller
           pip install -e .
 
       - name: Build .app with PyInstaller
@@ -40,7 +40,84 @@ jobs:
             --collect-all pygame \
             run_control_room.py
 
-      - name: Build DMG
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NRCR-app-${{ matrix.arch }}
+          path: dist/NuclearReactorControlRoom.app
+
+  build-universal-dmg:
+    runs-on: macos-14
+    needs: build-app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install merge + DMG deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install dmgbuild
+
+      - name: Download arm64 app
+        uses: actions/download-artifact@v4
+        with:
+          name: NRCR-app-arm64
+          path: artifacts/arm64
+
+      - name: Download x86_64 app
+        uses: actions/download-artifact@v4
+        with:
+          name: NRCR-app-x86_64
+          path: artifacts/x86_64
+
+      - name: Create universal app bundle
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          import subprocess
+
+          arm_app = Path('artifacts/arm64/NuclearReactorControlRoom.app')
+          x64_app = Path('artifacts/x86_64/NuclearReactorControlRoom.app')
+          out_app = Path('dist/NuclearReactorControlRoom.app')
+
+          if out_app.exists():
+              shutil.rmtree(out_app)
+
+          shutil.copytree(arm_app, out_app)
+
+          def is_macho(path: Path) -> bool:
+              proc = subprocess.run(['file', '-b', str(path)], capture_output=True, text=True, check=True)
+              return 'Mach-O' in proc.stdout
+
+          for src in x64_app.rglob('*'):
+              rel = src.relative_to(x64_app)
+              dst = out_app / rel
+
+              if src.is_dir():
+                  dst.mkdir(parents=True, exist_ok=True)
+                  continue
+
+              if not dst.exists():
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(src, dst)
+                  continue
+
+              if is_macho(src) and is_macho(dst):
+                  tmp = dst.with_suffix(dst.suffix + '.universal')
+                  subprocess.run(['lipo', '-create', str(dst), str(src), '-output', str(tmp)], check=True)
+                  tmp.replace(dst)
+
+          subprocess.run(['lipo', '-info', str(out_app / 'Contents/MacOS/NuclearReactorControlRoom')], check=True)
+          print('Universal app created:', out_app)
+          PY
+
+      - name: Build universal DMG
         run: |
           python - <<'PY'
           import os
@@ -50,7 +127,7 @@ jobs:
           assert os.path.isdir(app), f"Missing {app}"
 
           settings = {
-              'volume_name': f'NRCR-{os.environ.get("ARCH","unknown")}',
+              'volume_name': 'NRCR-universal',
               'format': 'UDZO',
               'files': [app],
               'symlinks': {'Applications': '/Applications'},
@@ -60,17 +137,15 @@ jobs:
           }
 
           dmgbuild.build_dmg(
-              filename=f"dist/NRCR-{os.environ.get('ARCH','unknown')}.dmg",
+              filename='dist/NRCR-universal.dmg',
               volume_name=settings['volume_name'],
               settings=settings,
           )
-          print('DMG built')
+          print('Universal DMG built')
           PY
-        env:
-          ARCH: ${{ matrix.arch }}
 
-      - name: Upload artifacts
+      - name: Upload universal DMG
         uses: actions/upload-artifact@v4
         with:
-          name: NRCR-${{ matrix.arch }}
-          path: dist/NRCR-${{ matrix.arch }}.dmg
+          name: NRCR-universal
+          path: dist/NRCR-universal.dmg
