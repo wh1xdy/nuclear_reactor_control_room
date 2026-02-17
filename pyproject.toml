@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nuclear-reactor-control-room"
+version = "0.1.0"
+description = "Nuclear reactor control room simulator (PWR/BWR/RBMK)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "wh1xdy"}]
+
+dependencies = [
+  "pygame>=2.5",
+  "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+steam = ["iapws>=1.5.3"]
+
+[project.scripts]
+nrcr = "run_control_room:main"
+
+[tool.setuptools]
+py-modules = ["run_control_room", "physics_engine", "physics_engine_bwr", "physics_engine_rbm"]
