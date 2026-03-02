@@ -19,6 +19,21 @@ class Slider:
         self.v = clamp(v, self.lo, self.hi)
 
 
+def draw_trend(screen, x, y, w, h, values, color, y_min, y_max):
+    pygame.draw.rect(screen, (25, 28, 35), (x, y, w, h), border_radius=6)
+    pygame.draw.rect(screen, (60, 66, 80), (x, y, w, h), 1, border_radius=6)
+    if len(values) < 2:
+        return
+    pts = []
+    n = len(values)
+    for i, v in enumerate(values):
+        px = x + int(i * (w - 4) / max(1, n - 1)) + 2
+        vv = clamp((v - y_min) / max(1e-6, y_max - y_min), 0.0, 1.0)
+        py = y + h - 2 - int(vv * (h - 4))
+        pts.append((px, py))
+    pygame.draw.lines(screen, color, False, pts, 2)
+
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((1280, 760))

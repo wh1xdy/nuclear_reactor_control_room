@@ -115,7 +115,7 @@ class RBMKParams:
     nominal_graphite_temp: float = 700.0
     nominal_void_fraction: float = 0.1
     nominal_steam_temp: float = 560.0
-    internal_dt: float = 0.01
+    internal_dt: float = 0.001
 
 
 @dataclass
