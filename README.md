@@ -9,10 +9,10 @@ En kontrollrumssimulator i Python/Pygame med tre reaktormodeller:
 Nu innehåller projektet också ett **supervisor-lager** som lägger till:
 
 - förenklad balance-of-plant (tryck, ånginventarie, kondensor, matarvatten),
-- skyddssystem med I&C-kanaler (2oo3-votering, filter/fel), alarmer och latched SCRAM,
+- skyddssystem (alarmer + automatiska trips/SCRAM),
 - startinterlock (startup permit),
 - injicerbara fel (pumpdegradering, matarvattenförlust),
-- axial tvåfas-kanalmodell i BWR/RBMK (kvalitet, slip-baserad void och tryckfall över kanal).
+- mer fysiknära void-dynamik i BWR/RBMK via tidsutvecklad käll/sänktermer.
 
 ## Kom igång
 
@@ -41,10 +41,6 @@ python run_control_room.py
 - `T`: turbine trip (på/av)
 - `Z`: pumpfel (på/av)
 - `X`: matarvattenfel (på/av)
-- `C`: kvittera aktiva larm
-- `L`: återställ SCRAM-latch (permissive-matris)
-- `B/G`: bypass för högtrycks-/högbränsletrip
-- `I`: inhibit auto-SCRAM
 - `SHIFT`: snabb justering
 - `SPACE`: SCRAM
 - `R`: reset
@@ -62,15 +58,13 @@ Skriptet verifierar kvalitativt att:
 
 1. SCRAM minskar effekt i alla tre reaktortyper.
 2. Skyddssystem och trips fungerar deterministiskt.
-3. BWR/RBMK-transienter körs med axial tvåfas-void/tryckfallsmodell.
-4. Referenstransienter jämförs mot benchmark-envelope med osäkerhetsband (`data/benchmark_envelopes.json`).
+3. BWR/RBMK-transienter körs med dynamisk void-modell.
 
 ## Realism och begränsningar
 
 Detta är fortfarande en utbildningssimulator, inte en certifierad träningssimulator.
-Men jämfört med MVP-versionen ingår nu fler realistiska kontroll- och skyddskedjor,
-axial tvåfas-kanalsmodell för kokande reaktorer, trend-/sekvensvy i HMI och
-benchmark-envelope-validering med osäkerhetsband.
+Men jämfört med MVP-versionen ingår nu fler realistiska kontroll- och skyddskedjor
+samt fler sekundärsystemsinteraktioner.
 
 ## macOS universal `.dmg`
 
