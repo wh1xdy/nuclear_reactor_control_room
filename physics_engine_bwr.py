@@ -247,7 +247,7 @@ class PointKinetics:
         # Power fraction (neutron population relative to nominal)
         self.n = 1.0
         # Precursor concentrations for the six delayed neutron groups
-        self.c = [b / (p.Lambda_prompt * ld) for b, ld in zip(self.p.beta, self.p.lambda_d)]
+        self.c = [b / (self.p.Lambda_prompt * ld) for b, ld in zip(self.p.beta, self.p.lambda_d)]
 
     def reactivity_rhs(self, reactivity: float, n: float, c: List[float]) -> float:
         """Right‑hand side of the neutron balance equation.
@@ -321,6 +321,9 @@ class PointKinetics:
         self.n += dt * dn2
         for i in range(6):
             self.c[i] += dt * dc2[i]
+        if not math.isfinite(self.n):
+            self.n = 0.0
+        self.n = max(0.0, min(5.0, self.n))
 
 
 class XenonIodine:
