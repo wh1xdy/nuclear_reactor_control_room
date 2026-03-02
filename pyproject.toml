@@ -23,4 +23,4 @@ steam = ["iapws>=1.5.3"]
 nrcr = "run_control_room:main"
 
 [tool.setuptools]
-py-modules = ["run_control_room", "physics_engine", "physics_engine_bwr", "physics_engine_rbm"]
+py-modules = ["run_control_room", "plant_supervisor", "physics_engine", "physics_engine_bwr", "physics_engine_rbm"]

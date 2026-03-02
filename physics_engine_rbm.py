@@ -188,6 +188,9 @@ class RBMKKinetics:
         self.n += dt * dn2
         for i in range(len(self.c)):
             self.c[i] += dt * dc2[i]
+        if not math.isfinite(self.n):
+            self.n = 0.0
+        self.n = max(0.0, min(5.0, self.n))
 
 
 class XenonIodineRBMK:
