@@ -102,6 +102,7 @@ class RBMKParams:
     h_steam_to_turbine: float = 4.0e7
     turbine_efficiency: float = 0.32
     rod_worth: float = -0.05  # control rods still negative
+    scram_extra_worth: float = -0.12  # additional negative worth on full trip
     fuel_temp_coeff: float = -1.0e-5  # negative doppler
     graphite_temp_coeff: float = -5.0e-6  # graphite also gives negative feedback
     void_coeff: float = +0.08  # positive void coefficient (≈ +8 pcm per % void)
@@ -114,7 +115,7 @@ class RBMKParams:
     nominal_graphite_temp: float = 700.0
     nominal_void_fraction: float = 0.1
     nominal_steam_temp: float = 560.0
-    internal_dt: float = 0.01
+    internal_dt: float = 0.001
 
 
 @dataclass
@@ -188,6 +189,10 @@ class RBMKKinetics:
         self.n += dt * dn2
         for i in range(len(self.c)):
             self.c[i] += dt * dc2[i]
+        if not math.isfinite(self.n):
+            self.n = 0.0
+        if self.n < 0.0:
+            self.n = 0.0
 
 
 class XenonIodineRBMK:
@@ -277,11 +282,18 @@ class RBMKPlant:
         if controls.scram:
             self.scrammed = True
         rho_rods = rod_pos * self.p.rod_worth
+        if self.scrammed or controls.scram:
+            rho_rods += self.p.scram_extra_worth
         rho_fuel = self.p.fuel_temp_coeff * (self.thermal.T_fuel - self.p.nominal_fuel_temp)
         rho_graphite = self.p.graphite_temp_coeff * (self.thermal.T_graphite - self.p.nominal_graphite_temp)
         rho_void = self.p.void_coeff * (self.thermal.alpha - self.p.nominal_void_fraction)
         rho_xe = -self.p.xenon_reactivity_coeff * self.xenon.Xe
-        return rho_rods + rho_fuel + rho_graphite + rho_void + rho_xe
+        rho = rho_rods + rho_fuel + rho_graphite + rho_void + rho_xe
+        beta_total = sum(self.p.beta)
+        # Keep positive reactivity below delayed critical to avoid
+        # numerically-driven prompt excursions in this simplified model.
+        rho = max(-0.9, min(beta_total * 0.8, rho))
+        return rho
 
     def step(self, dt: float, controls: RBMKControlInputs) -> RBMKPlantSnapshot:
         n_steps = max(1, int(math.ceil(dt / self.p.internal_dt)))
