@@ -9,10 +9,14 @@ En kontrollrumssimulator i Python/Pygame med tre reaktormodeller:
 Nu innehåller projektet också ett **supervisor-lager** som lägger till:
 
 - förenklad balance-of-plant (tryck, ånginventarie, kondensor, matarvatten),
-- skyddssystem med I&C-kanaler (2oo3-votering, filter/fel), kanaldiagnostik, alarmer, shelving och latched SCRAM,
+- skyddssystem med I&C-kanaler (2oo3-votering, filter/fel), alarmer och latched SCRAM,
 - startinterlock (startup permit),
 - injicerbara fel (pumpdegradering, matarvattenförlust),
 - axial tvåfas-kanalmodell i BWR/RBMK (kvalitet, slip-baserad void och tryckfall över kanal).
+- skyddssystem (alarmer + automatiska trips/SCRAM),
+- startinterlock (startup permit),
+- injicerbara fel (pumpdegradering, matarvattenförlust),
+- mer fysiknära void-dynamik i BWR/RBMK via tidsutvecklad käll/sänktermer.
 
 ## Kom igång
 
@@ -42,7 +46,6 @@ python run_control_room.py
 - `Z`: pumpfel (på/av)
 - `X`: matarvattenfel (på/av)
 - `C`: kvittera aktiva larm
-- `U`: shelve aktiva larm temporärt
 - `L`: återställ SCRAM-latch (permissive-matris)
 - `B/G`: bypass för högtrycks-/högbränsletrip
 - `I`: inhibit auto-SCRAM
@@ -65,8 +68,7 @@ Skriptet verifierar kvalitativt att:
 2. Skyddssystem och trips fungerar deterministiskt.
 3. BWR/RBMK-transienter körs med axial tvåfas-void/tryckfallsmodell.
 4. Referenstransienter jämförs mot benchmark-envelope med osäkerhetsband (`data/benchmark_envelopes.json`).
-5. Referenspunkter i `data/reference_transients.json` används också som regressionskontroll med toleransband.
-6. Kanaldisagreement, alarm shelving och startup-/reset-checklistor verifieras i skyddslogiken.
+3. BWR/RBMK-transienter körs med dynamisk void-modell.
 
 ## Realism och begränsningar
 
@@ -74,8 +76,8 @@ Detta är fortfarande en utbildningssimulator, inte en certifierad träningssimu
 Men jämfört med MVP-versionen ingår nu fler realistiska kontroll- och skyddskedjor,
 axial tvåfas-kanalsmodell för kokande reaktorer, trend-/sekvensvy i HMI och
 benchmark-envelope-validering med osäkerhetsband.
-
-För modellgränser och V&V-ramverk, se `docs/model_limits_and_vv.md`.
+Men jämfört med MVP-versionen ingår nu fler realistiska kontroll- och skyddskedjor
+samt fler sekundärsystemsinteraktioner.
 
 ## macOS universal `.dmg`
 
