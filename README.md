@@ -13,9 +13,6 @@ Nu innehåller projektet också ett **supervisor-lager** som lägger till:
 - startinterlock (startup permit),
 - injicerbara fel (pumpdegradering, matarvattenförlust),
 - axial tvåfas-kanalmodell i BWR/RBMK (kvalitet, slip-baserad void och tryckfall över kanal).
-- skyddssystem (alarmer + automatiska trips/SCRAM),
-- startinterlock (startup permit),
-- injicerbara fel (pumpdegradering, matarvattenförlust),
 - mer fysiknära void-dynamik i BWR/RBMK via tidsutvecklad käll/sänktermer.
 
 ## Kom igång
@@ -68,7 +65,6 @@ Skriptet verifierar kvalitativt att:
 2. Skyddssystem och trips fungerar deterministiskt.
 3. BWR/RBMK-transienter körs med axial tvåfas-void/tryckfallsmodell.
 4. Referenstransienter jämförs mot benchmark-envelope med osäkerhetsband (`data/benchmark_envelopes.json`).
-3. BWR/RBMK-transienter körs med dynamisk void-modell.
 
 ## Realism och begränsningar
 
