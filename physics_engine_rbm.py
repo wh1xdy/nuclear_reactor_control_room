@@ -195,6 +195,7 @@ class RBMKKinetics:
             self.n = 0.0
         if self.n > 20.0:
             self.n = 20.0
+        self.n = max(0.0, min(5.0, self.n))
 
 
 class XenonIodineRBMK:
