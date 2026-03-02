@@ -176,7 +176,7 @@ class BWRParams:
     nominal_fuel_temp: float = 600.0
     nominal_void_fraction: float = 0.4
     nominal_steam_temp: float = 540.0
-    internal_dt: float = 0.01
+    internal_dt: float = 0.001
 
 
 @dataclass
