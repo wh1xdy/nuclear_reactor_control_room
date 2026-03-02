@@ -9,10 +9,10 @@ En kontrollrumssimulator i Python/Pygame med tre reaktormodeller:
 Nu innehåller projektet också ett **supervisor-lager** som lägger till:
 
 - förenklad balance-of-plant (tryck, ånginventarie, kondensor, matarvatten),
-- skyddssystem (alarmer + automatiska trips/SCRAM med latch),
+- skyddssystem med I&C-kanaler (2oo3-votering, filter/fel), alarmer och latched SCRAM,
 - startinterlock (startup permit),
 - injicerbara fel (pumpdegradering, matarvattenförlust),
-- mer fysiknära void-dynamik i BWR/RBMK via tidsutvecklad käll/sänktermer.
+- axial tvåfas-kanalmodell i BWR/RBMK (kvalitet, slip-baserad void och tryckfall över kanal).
 
 ## Kom igång
 
@@ -42,7 +42,9 @@ python run_control_room.py
 - `Z`: pumpfel (på/av)
 - `X`: matarvattenfel (på/av)
 - `C`: kvittera aktiva larm
-- `L`: återställ SCRAM-latch (om säkra villkor uppfylls)
+- `L`: återställ SCRAM-latch (permissive-matris)
+- `B/G`: bypass för högtrycks-/högbränsletrip
+- `I`: inhibit auto-SCRAM
 - `SHIFT`: snabb justering
 - `SPACE`: SCRAM
 - `R`: reset
@@ -60,7 +62,8 @@ Skriptet verifierar kvalitativt att:
 
 1. SCRAM minskar effekt i alla tre reaktortyper.
 2. Skyddssystem och trips fungerar deterministiskt.
-3. BWR/RBMK-transienter körs med dynamisk void-modell.
+3. BWR/RBMK-transienter körs med axial tvåfas-void/tryckfallsmodell.
+4. Referenstransienter jämförs mot kalibreringskurvor (`data/reference_transients.json`).
 
 ## Realism och begränsningar
 

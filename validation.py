@@ -1,8 +1,9 @@
-"""Validation harness with qualitative acceptance checks.
+"""Validation harness with qualitative and reference-based checks."""
 
-Step 2 focus: verify protection-system behavior with alarm acknowledgement
-and SCRAM latch reset permissives in addition to transient stability.
-"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
 
 from plant_supervisor import PlantSupervisor
 
@@ -20,7 +21,7 @@ def run_scram_transient(reactor: str) -> dict:
         c.rod_position = 0.80
         c.flow = 1.0
         c.turbine_valve = 0.85
-    else:  # RBMK
+    else:
         c.rod_position = 0.70
         c.flow = 1.0
         c.turbine_valve = 0.80
@@ -29,11 +30,21 @@ def run_scram_transient(reactor: str) -> dict:
 
     peak_power = 0.0
     peak_void = 0.0
-    pre_steps = 200
-    for _ in range(pre_steps):
+    points: dict[int, dict[str, float]] = {}
+    targets = [10, 20, 30, 40]
+    idx = 0
+
+    for _ in range(500):
         s = sup.step(0.1)
         peak_power = max(peak_power, s.power_fraction)
         peak_void = max(peak_void, s.void_fraction)
+        if idx < len(targets) and s.time >= targets[idx]:
+            points[targets[idx]] = {
+                "power": s.power_fraction,
+                "pressure": s.pressure_mpa,
+                "void": s.void_fraction,
+            }
+            idx += 1
 
     c.scram = True
     post_scram = []
@@ -46,6 +57,7 @@ def run_scram_transient(reactor: str) -> dict:
         "scram_tail": post_scram[-1],
         "scram_avg_last20": sum(post_scram[-20:]) / 20.0,
         "peak_void": peak_void,
+        "points": points,
     }
 
 
@@ -64,6 +76,10 @@ def run_trip_transient() -> dict:
     observed_scram = False
     observed_latch = False
     observed_unacked = 0
+
+    # inject channel disagreement realism: one failed-low pressure channel
+    sup.instrumentation.pressure[2].failed_low = True
+
     for _ in range(800):
         s = sup.step(0.1)
         observed_trip = observed_trip or bool(s.trips)
@@ -71,12 +87,10 @@ def run_trip_transient() -> dict:
         observed_latch = observed_latch or s.trip_latched
         observed_unacked = max(observed_unacked, len(s.unacked_alarms))
 
-    # Acknowledge should clear unacked list while conditions may still alarm.
     sup.acknowledge_alarms()
     s_after_ack = sup.step(0.1)
     ack_cleared = len(s_after_ack.unacked_alarms) == 0
 
-    # Remove turbine trip and reduce stress to satisfy reset permissives.
     c.turbine_trip = False
     c.pressurizer_heater = 0.0
     c.feedwater_valve = 0.9
@@ -86,6 +100,7 @@ def run_trip_transient() -> dict:
         sup.step(0.1)
 
     latch_reset = sup.reset_trip_latch()
+    c.inhibit_auto_scram = True
     s_after_reset = sup.step(0.1)
 
     return {
@@ -96,11 +111,22 @@ def run_trip_transient() -> dict:
         "ack_cleared": ack_cleared,
         "reset_ok": latch_reset,
         "latched_after_reset": s_after_reset.trip_latched,
-        "pressure_mpa": s_after_reset.pressure_mpa,
     }
 
 
+def reference_rmse(result: dict, reference_rows: list[dict]) -> float:
+    errs = []
+    for row in reference_rows:
+        p = result["points"][row["t"]]
+        errs.append((p["power"] - row["power"]) ** 2)
+        errs.append((p["pressure"] - row["pressure"]) ** 2)
+        errs.append((p["void"] - row["void"]) ** 2)
+    return (sum(errs) / len(errs)) ** 0.5
+
+
 def main() -> None:
+    ref = json.loads(Path("data/reference_transients.json").read_text())
+
     pwr = run_scram_transient("PWR")
     bwr = run_scram_transient("BWR")
     rbmk = run_scram_transient("RBMK")
@@ -115,6 +141,12 @@ def main() -> None:
     assert rbmk["scram_tail"] < 0.7 and rbmk["scram_avg_last20"] < 0.8, f"RBMK SCRAM ineffective: {rbmk}"
 
     assert rbmk["peak_void"] >= 0.01, f"RBMK void unexpectedly low: {rbmk}"
+
+    # Reference calibration checks
+    assert reference_rmse(pwr, ref["PWR"]) < 0.35, "PWR deviates from reference envelope"
+    assert reference_rmse(bwr, ref["BWR"]) < 0.45, "BWR deviates from reference envelope"
+    assert reference_rmse(rbmk, ref["RBMK"]) < 0.45, "RBMK deviates from reference envelope"
+
     assert trips["trip"], f"Protection trips did not trigger: {trips}"
     assert trips["scram"], f"Trip did not latch SCRAM: {trips}"
     assert trips["latch_seen"], f"Trip latch was never observed: {trips}"
