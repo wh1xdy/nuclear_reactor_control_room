@@ -33,6 +33,9 @@ class BalanceOfPlantState:
     feedwater_inventory: float = 1.0
     alarms: List[str] = field(default_factory=list)
     trips: List[str] = field(default_factory=list)
+    unacked_alarms: List[str] = field(default_factory=list)
+    acked_alarms: List[str] = field(default_factory=list)
+    trip_latched: bool = False
 
 
 @dataclass
@@ -53,6 +56,8 @@ class UnifiedSnapshot:
     feedwater_inventory: float
     alarms: List[str]
     trips: List[str]
+    unacked_alarms: List[str]
+    trip_latched: bool
 
 
 class PlantSupervisor:
@@ -83,6 +88,21 @@ class PlantSupervisor:
         self.controls = SupervisorControls()
         self.bop = BalanceOfPlantState()
         self._init_plant()
+
+    def acknowledge_alarms(self) -> None:
+        self.bop.acked_alarms = list(self.bop.alarms)
+        self.bop.unacked_alarms = []
+
+    def reset_trip_latch(self) -> bool:
+        safe_pressure = self.bop.pressure_mpa < (15.9 if self.reactor_type == "PWR" else 7.5)
+        safe_temp = True
+        if hasattr(self.plant, "thermal") and hasattr(self.plant.thermal, "T_fuel"):
+            safe_temp = self.plant.thermal.T_fuel < 900.0
+        if safe_pressure and safe_temp and not self.controls.turbine_trip:
+            self.bop.trip_latched = False
+            self.controls.scram = False
+            return True
+        return False
 
     def _mechanistic_void_step(self, dt: float) -> None:
         if self.reactor_type not in ("BWR", "RBMK"):
@@ -121,11 +141,14 @@ class PlantSupervisor:
     def _protection(self, snap: Dict[str, float]) -> None:
         alarms: List[str] = []
         trips: List[str] = []
+        votes = 0
 
         if snap["fuel_temp_k"] > 1200:
             alarms.append("Fuel temperature high")
+            votes += 1
         if self.bop.pressure_mpa > (16.2 if self.reactor_type == "PWR" else 7.8):
             alarms.append("Reactor pressure high")
+            votes += 1
         if self.bop.feedwater_inventory < 0.2:
             alarms.append("Feedwater inventory low")
         if self.bop.condenser_temp_k > 330:
@@ -140,11 +163,29 @@ class PlantSupervisor:
         if self.controls.turbine_trip:
             trips.append("Turbine trip active")
 
+        if votes >= 2 and "AUTO SCRAM: 2oo2 process vote" not in trips:
+            trips.append("AUTO SCRAM: 2oo2 process vote")
+
         if trips:
             self.controls.scram = True
+            self.bop.trip_latched = True
+
+        # if latch exists, keep SCRAM asserted until explicit reset
+        if self.bop.trip_latched:
+            self.controls.scram = True
+            if not trips:
+                trips.append("SCRAM latched")
 
         self.bop.alarms = alarms
         self.bop.trips = trips
+
+        active_set = set(alarms)
+        # Keep acknowledgements only for currently active alarms.
+        self.bop.acked_alarms = [a for a in self.bop.acked_alarms if a in active_set]
+        self.bop.unacked_alarms = [a for a in self.bop.unacked_alarms if a in active_set and a not in self.bop.acked_alarms]
+        for a in alarms:
+            if a not in self.bop.acked_alarms and a not in self.bop.unacked_alarms:
+                self.bop.unacked_alarms.append(a)
 
     def step(self, dt: float) -> UnifiedSnapshot:
         c = self.controls
@@ -229,4 +270,6 @@ class PlantSupervisor:
             feedwater_inventory=self.bop.feedwater_inventory,
             alarms=list(self.bop.alarms),
             trips=list(self.bop.trips),
+            unacked_alarms=list(self.bop.unacked_alarms),
+            trip_latched=self.bop.trip_latched,
         )

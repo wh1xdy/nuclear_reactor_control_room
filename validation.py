@@ -1,8 +1,7 @@
 """Validation harness with qualitative acceptance checks.
 
-Step 1 focus: ensure all reactor models remain numerically stable without
-hard neutron-population clipping and that SCRAM behavior is effective for
-representative operator conditions.
+Step 2 focus: verify protection-system behavior with alarm acknowledgement
+and SCRAM latch reset permissives in addition to transient stability.
 """
 
 from plant_supervisor import PlantSupervisor
@@ -63,15 +62,41 @@ def run_trip_transient() -> dict:
 
     observed_trip = False
     observed_scram = False
+    observed_latch = False
+    observed_unacked = 0
     for _ in range(800):
         s = sup.step(0.1)
         observed_trip = observed_trip or bool(s.trips)
         observed_scram = observed_scram or c.scram
+        observed_latch = observed_latch or s.trip_latched
+        observed_unacked = max(observed_unacked, len(s.unacked_alarms))
+
+    # Acknowledge should clear unacked list while conditions may still alarm.
+    sup.acknowledge_alarms()
+    s_after_ack = sup.step(0.1)
+    ack_cleared = len(s_after_ack.unacked_alarms) == 0
+
+    # Remove turbine trip and reduce stress to satisfy reset permissives.
+    c.turbine_trip = False
+    c.pressurizer_heater = 0.0
+    c.feedwater_valve = 0.9
+    c.rod_position = 1.0
+    c.flow = 1.0
+    for _ in range(200):
+        sup.step(0.1)
+
+    latch_reset = sup.reset_trip_latch()
+    s_after_reset = sup.step(0.1)
 
     return {
         "trip": observed_trip,
         "scram": observed_scram,
-        "pressure_mpa": s.pressure_mpa,
+        "latch_seen": observed_latch,
+        "peak_unacked": observed_unacked,
+        "ack_cleared": ack_cleared,
+        "reset_ok": latch_reset,
+        "latched_after_reset": s_after_reset.trip_latched,
+        "pressure_mpa": s_after_reset.pressure_mpa,
     }
 
 
@@ -92,6 +117,11 @@ def main() -> None:
     assert rbmk["peak_void"] >= 0.01, f"RBMK void unexpectedly low: {rbmk}"
     assert trips["trip"], f"Protection trips did not trigger: {trips}"
     assert trips["scram"], f"Trip did not latch SCRAM: {trips}"
+    assert trips["latch_seen"], f"Trip latch was never observed: {trips}"
+    assert trips["peak_unacked"] > 0, f"No unacked alarms observed: {trips}"
+    assert trips["ack_cleared"], f"Alarm acknowledge did not clear unacked set: {trips}"
+    assert trips["reset_ok"], f"Latch reset permissive failed: {trips}"
+    assert not trips["latched_after_reset"], f"Latch remained set after reset: {trips}"
 
     print("Validation summary")
     print("PWR", pwr)

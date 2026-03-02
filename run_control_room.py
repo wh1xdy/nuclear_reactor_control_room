@@ -70,6 +70,10 @@ def main():
                     controls.fault_pump_degraded = not controls.fault_pump_degraded
                 elif ev.key == pygame.K_x:
                     controls.fault_feedwater_loss = not controls.fault_feedwater_loss
+                elif ev.key == pygame.K_c:
+                    supervisor.acknowledge_alarms()
+                elif ev.key == pygame.K_l:
+                    supervisor.reset_trip_latch()
 
         keys = pygame.key.get_pressed()
         step = 0.004
@@ -132,6 +136,8 @@ def main():
             f"Turbine trip: {'ON' if controls.turbine_trip else 'OFF'}",
             f"Pump fault (Z): {'ON' if controls.fault_pump_degraded else 'OFF'}",
             f"Feedwater fault (X): {'ON' if controls.fault_feedwater_loss else 'OFF'}",
+            f"SCRAM latch: {'ON' if snapshot.trip_latched else 'OFF'}",
+            f"Unacked alarms: {len(snapshot.unacked_alarms)} (C=ack)",
         ]
         for s in status_lines:
             screen.blit(font.render(s, True, (185, 200, 215)), (20, y))
@@ -163,7 +169,7 @@ def main():
         alarm_title = font.render("Alarms / Trips", True, (255, 200, 80))
         screen.blit(alarm_title, (420, y_alarm))
         y_alarm += 28
-        messages = snapshot.alarms + snapshot.trips
+        messages = [f"! {a}" for a in snapshot.unacked_alarms] + snapshot.alarms + snapshot.trips
         if not messages:
             messages = ["None"]
         for m in messages[:10]:
@@ -172,7 +178,7 @@ def main():
             y_alarm += 22
 
         help1 = font.render(
-            "W/S rods A/D flow Q/E turbine F/V feedwater H/N pressurizer  SHIFT=fast  R=reset ESC=quit",
+            "W/S rods A/D flow Q/E turbine F/V feedwater H/N pressurizer C=ack L=reset-latch SHIFT=fast R=reset ESC=quit",
             True,
             (160, 170, 185),
         )
