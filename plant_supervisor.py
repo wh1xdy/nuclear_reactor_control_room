@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal
+from typing import Dict, List, Literal, Union
 
 from physics_engine import ControlInputs as PWRControlInputs, PWRPlant
 from physics_engine_bwr import BWRControlInputs, BWRPlant
@@ -211,6 +212,10 @@ class PlantSupervisor:
 
         self._update_bop(dt, thermal_power_w)
         self._protection(snap)
+        if c.scram:
+            self.plant.kinetics.n = min(self.plant.kinetics.n * 0.5, 0.15)
+            snap["power_fraction"] = self.plant.kinetics.n
+            snap["thermal_mw"] = snap["power_fraction"] * (3000.0 if self.reactor_type == "PWR" else (2700.0 if self.reactor_type == "BWR" else 3200.0))
 
         return UnifiedSnapshot(
             reactor_type=self.reactor_type,
