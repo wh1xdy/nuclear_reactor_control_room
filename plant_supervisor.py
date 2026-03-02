@@ -65,6 +65,7 @@ class AxialChannelState:
     quality: List[float]
     node_void: List[float]
     node_pressure_mpa: List[float]
+    node_power: List[float]
     avg_void: float
     pressure_drop_mpa: float
 
@@ -81,6 +82,7 @@ class BalanceOfPlantState:
     acked_alarms: List[str] = field(default_factory=list)
     trip_latched: bool = False
     trip_timers: Dict[str, float] = field(default_factory=lambda: {"fuel": 0.0, "pressure": 0.0})
+    event_log: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -105,6 +107,7 @@ class UnifiedSnapshot:
     unacked_alarms: List[str]
     trip_latched: bool
     checklist: Dict[str, bool]
+    event_log: List[str]
 
 
 class PlantSupervisor:
@@ -114,7 +117,7 @@ class PlantSupervisor:
         self.reactor_type: ReactorType = reactor_type
         self.controls = SupervisorControls()
         self.bop = BalanceOfPlantState()
-        self.channel_state = AxialChannelState([0.0] * 6, [0.0] * 6, [7.0] * 6, 0.0, 0.0)
+        self.channel_state = AxialChannelState([0.0] * 6, [0.0] * 6, [7.0] * 6, [1.0/6.0] * 6, 0.0, 0.0)
         self.instrumentation = Instrumentation()
         self.trend_power: Deque[float] = deque(maxlen=240)
         self.trend_pressure: Deque[float] = deque(maxlen=240)
@@ -126,17 +129,17 @@ class PlantSupervisor:
             self.plant = PWRPlant()
             self.ctrl = PWRControlInputs()
             self.bop.pressure_mpa = 15.5
-            self.channel_state = AxialChannelState([0.0] * 6, [0.0] * 6, [15.5] * 6, 0.0, 0.0)
+            self.channel_state = AxialChannelState([0.0] * 6, [0.0] * 6, [15.5] * 6, [1.0/6.0] * 6, 0.0, 0.0)
         elif self.reactor_type == "BWR":
             self.plant = BWRPlant()
             self.ctrl = BWRControlInputs()
             self.bop.pressure_mpa = 7.0
-            self.channel_state = AxialChannelState([0.03] * 6, [0.03] * 6, [7.0] * 6, 0.03, 0.0)
+            self.channel_state = AxialChannelState([0.03] * 6, [0.03] * 6, [7.0] * 6, [1.0/6.0] * 6, 0.03, 0.0)
         else:
             self.plant = RBMKPlant()
             self.ctrl = RBMKControlInputs()
             self.bop.pressure_mpa = 7.0
-            self.channel_state = AxialChannelState([0.02] * 6, [0.02] * 6, [7.0] * 6, 0.02, 0.0)
+            self.channel_state = AxialChannelState([0.02] * 6, [0.02] * 6, [7.0] * 6, [1.0/6.0] * 6, 0.02, 0.0)
 
         self.instrumentation = Instrumentation(
             fuel_temp=[SensorChannel(self.plant.thermal.T_fuel, tau_s=0.4), SensorChannel(self.plant.thermal.T_fuel, tau_s=0.5), SensorChannel(self.plant.thermal.T_fuel, tau_s=0.45)],
@@ -187,13 +190,21 @@ class PlantSupervisor:
         dp_total = 0.12 * power_fraction / max(flow, 0.1) + 0.015 * flow * flow
         self.channel_state.pressure_drop_mpa = max(0.0, dp_total)
 
+        # axial power shape (peaked mid-core), normalized
+        shape = []
+        for i in range(n):
+            z = (i + 0.5) / n
+            shape.append(0.6 + 0.8 * (1.0 - (2.0 * z - 1.0) ** 2))
+        ssum = sum(shape)
+        self.channel_state.node_power = [power_fraction * s / ssum for s in shape]
+
         for i in range(n):
             z = (i + 0.5) / n
             local_p = inlet_pressure - z * self.channel_state.pressure_drop_mpa
             self.channel_state.node_pressure_mpa[i] = max(4.5, local_p)
 
-            # simple quality growth up the channel
-            source = 0.08 * power_fraction * (0.4 + z) / max(flow, 0.1)
+            # quality growth with local power peaking
+            source = 0.16 * self.channel_state.node_power[i] / max(flow, 0.1)
             condense = 0.06 * (self.channel_state.quality[i]) * flow
             dquality = source - condense
             self.channel_state.quality[i] = max(0.0, min(1.0, self.channel_state.quality[i] + dt * dquality))
@@ -298,6 +309,17 @@ class PlantSupervisor:
             if a not in self.bop.acked_alarms and a not in self.bop.unacked_alarms:
                 self.bop.unacked_alarms.append(a)
 
+        # compact event log (alarm/trip sequence)
+        for a in alarms:
+            msg = f"ALARM {a}"
+            if not self.bop.event_log or self.bop.event_log[-1] != msg:
+                self.bop.event_log.append(msg)
+        for tr in trips:
+            msg = f"TRIP {tr}"
+            if not self.bop.event_log or self.bop.event_log[-1] != msg:
+                self.bop.event_log.append(msg)
+        self.bop.event_log = self.bop.event_log[-120:]
+
     def step(self, dt: float) -> UnifiedSnapshot:
         c = self.controls
         flow = c.flow * (0.6 if c.fault_pump_degraded else 1.0)
@@ -390,4 +412,5 @@ class PlantSupervisor:
             unacked_alarms=list(self.bop.unacked_alarms),
             trip_latched=self.bop.trip_latched,
             checklist=self._build_reset_checklist(),
+            event_log=list(self.bop.event_log),
         )
