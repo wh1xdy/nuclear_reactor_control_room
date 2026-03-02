@@ -216,6 +216,15 @@ def main():
             screen.blit(font.render(f"- {m}", True, col), (420, y_alarm))
             y_alarm += 20
 
+        # event log
+        y_log = 500
+        screen.blit(font.render("Event log (latest first)", True, (170, 210, 255)), (790, y_log))
+        y_log += 24
+        for e in list(reversed(snapshot.event_log))[:12]:
+            col = (255, 120, 120) if e.startswith("TRIP") else (220, 220, 140)
+            screen.blit(font.render(f"- {e}", True, col), (790, y_log))
+            y_log += 18
+
         # procedural checklist
         y_proc = 500
         screen.blit(font.render("Reset permissive checklist", True, (180, 220, 180)), (20, y_proc))

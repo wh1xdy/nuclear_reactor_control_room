@@ -63,13 +63,14 @@ Skriptet verifierar kvalitativt att:
 1. SCRAM minskar effekt i alla tre reaktortyper.
 2. Skyddssystem och trips fungerar deterministiskt.
 3. BWR/RBMK-transienter körs med axial tvåfas-void/tryckfallsmodell.
-4. Referenstransienter jämförs mot kalibreringskurvor (`data/reference_transients.json`).
+4. Referenstransienter jämförs mot benchmark-envelope med osäkerhetsband (`data/benchmark_envelopes.json`).
 
 ## Realism och begränsningar
 
 Detta är fortfarande en utbildningssimulator, inte en certifierad träningssimulator.
-Men jämfört med MVP-versionen ingår nu fler realistiska kontroll- och skyddskedjor
-samt fler sekundärsystemsinteraktioner.
+Men jämfört med MVP-versionen ingår nu fler realistiska kontroll- och skyddskedjor,
+axial tvåfas-kanalsmodell för kokande reaktorer, trend-/sekvensvy i HMI och
+benchmark-envelope-validering med osäkerhetsband.
 
 ## macOS universal `.dmg`
 

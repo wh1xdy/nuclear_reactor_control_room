@@ -1,4 +1,4 @@
-"""Validation harness with qualitative and reference-based checks."""
+"""Validation harness with qualitative and benchmark-envelope checks."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 from plant_supervisor import PlantSupervisor
+
+TIMES = [10, 20, 30, 40]
 
 
 def run_scram_transient(reactor: str) -> dict:
@@ -31,15 +33,14 @@ def run_scram_transient(reactor: str) -> dict:
     peak_power = 0.0
     peak_void = 0.0
     points: dict[int, dict[str, float]] = {}
-    targets = [10, 20, 30, 40]
     idx = 0
 
     for _ in range(500):
         s = sup.step(0.1)
         peak_power = max(peak_power, s.power_fraction)
         peak_void = max(peak_void, s.void_fraction)
-        if idx < len(targets) and s.time >= targets[idx]:
-            points[targets[idx]] = {
+        if idx < len(TIMES) and s.time >= TIMES[idx]:
+            points[TIMES[idx]] = {
                 "power": s.power_fraction,
                 "pressure": s.pressure_mpa,
                 "void": s.void_fraction,
@@ -77,7 +78,6 @@ def run_trip_transient() -> dict:
     observed_latch = False
     observed_unacked = 0
 
-    # inject channel disagreement realism: one failed-low pressure channel
     sup.instrumentation.pressure[2].failed_low = True
 
     for _ in range(800):
@@ -111,21 +111,20 @@ def run_trip_transient() -> dict:
         "ack_cleared": ack_cleared,
         "reset_ok": latch_reset,
         "latched_after_reset": s_after_reset.trip_latched,
+        "event_log_len": len(s_after_reset.event_log),
     }
 
 
-def reference_rmse(result: dict, reference_rows: list[dict]) -> float:
-    errs = []
-    for row in reference_rows:
-        p = result["points"][row["t"]]
-        errs.append((p["power"] - row["power"]) ** 2)
-        errs.append((p["pressure"] - row["pressure"]) ** 2)
-        errs.append((p["void"] - row["void"]) ** 2)
-    return (sum(errs) / len(errs)) ** 0.5
+def assert_in_envelope(result: dict, env: dict, reactor: str) -> None:
+    for i, t in enumerate(TIMES):
+        p = result["points"][t]
+        for key in ("power", "pressure", "void"):
+            lo, hi = env[key][i]
+            assert lo <= p[key] <= hi, f"{reactor} {key}@{t}s outside envelope: {p[key]} not in [{lo},{hi}]"
 
 
 def main() -> None:
-    ref = json.loads(Path("data/reference_transients.json").read_text())
+    envelopes = json.loads(Path("data/benchmark_envelopes.json").read_text())
 
     pwr = run_scram_transient("PWR")
     bwr = run_scram_transient("BWR")
@@ -142,10 +141,9 @@ def main() -> None:
 
     assert rbmk["peak_void"] >= 0.01, f"RBMK void unexpectedly low: {rbmk}"
 
-    # Reference calibration checks
-    assert reference_rmse(pwr, ref["PWR"]) < 0.35, "PWR deviates from reference envelope"
-    assert reference_rmse(bwr, ref["BWR"]) < 0.45, "BWR deviates from reference envelope"
-    assert reference_rmse(rbmk, ref["RBMK"]) < 0.45, "RBMK deviates from reference envelope"
+    assert_in_envelope(pwr, envelopes["PWR"], "PWR")
+    assert_in_envelope(bwr, envelopes["BWR"], "BWR")
+    assert_in_envelope(rbmk, envelopes["RBMK"], "RBMK")
 
     assert trips["trip"], f"Protection trips did not trigger: {trips}"
     assert trips["scram"], f"Trip did not latch SCRAM: {trips}"
@@ -154,6 +152,7 @@ def main() -> None:
     assert trips["ack_cleared"], f"Alarm acknowledge did not clear unacked set: {trips}"
     assert trips["reset_ok"], f"Latch reset permissive failed: {trips}"
     assert not trips["latched_after_reset"], f"Latch remained set after reset: {trips}"
+    assert trips["event_log_len"] > 0, f"Event log did not record protection sequence: {trips}"
 
     print("Validation summary")
     print("PWR", pwr)
