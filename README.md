@@ -1,10 +1,18 @@
 # Nuclear Reactor Control Room Sim
 
-En enkel kontrollrumssimulator i Python/Pygame med tre reaktormodeller:
+En kontrollrumssimulator i Python/Pygame med tre reaktormodeller:
 
 - PWR
 - BWR
 - RBMK
+
+Nu innehåller projektet också ett **supervisor-lager** som lägger till:
+
+- förenklad balance-of-plant (tryck, ånginventarie, kondensor, matarvatten),
+- skyddssystem med I&C-kanaler (2oo3-votering, filter/fel), alarmer och latched SCRAM,
+- startinterlock (startup permit),
+- injicerbara fel (pumpdegradering, matarvattenförlust),
+- axial tvåfas-kanalmodell i BWR/RBMK (kvalitet, slip-baserad void och tryckfall över kanal).
 
 ## Kom igång
 
@@ -27,51 +35,50 @@ python run_control_room.py
 - `W/S`: styrstavar
 - `A/D`: flöde/pumphastighet
 - `Q/E`: turbinventil
+- `F/V`: matarvattenventil
+- `H/N`: pressurizer heater
+- `P`: startup permit interlock (på/av)
+- `T`: turbine trip (på/av)
+- `Z`: pumpfel (på/av)
+- `X`: matarvattenfel (på/av)
+- `C`: kvittera aktiva larm
+- `L`: återställ SCRAM-latch (permissive-matris)
+- `B/G`: bypass för högtrycks-/högbränsletrip
+- `I`: inhibit auto-SCRAM
 - `SHIFT`: snabb justering
 - `SPACE`: SCRAM
 - `R`: reset
 - `ESC`: avsluta
 
+## Validering
+
+Kör kvalitetssäkring av transienta förlopp:
+
+```bash
+python validation.py
+```
+
+Skriptet verifierar kvalitativt att:
+
+1. SCRAM minskar effekt i alla tre reaktortyper.
+2. Skyddssystem och trips fungerar deterministiskt.
+3. BWR/RBMK-transienter körs med axial tvåfas-void/tryckfallsmodell.
+4. Referenstransienter jämförs mot benchmark-envelope med osäkerhetsband (`data/benchmark_envelopes.json`).
+
+## Realism och begränsningar
+
+Detta är fortfarande en utbildningssimulator, inte en certifierad träningssimulator.
+Men jämfört med MVP-versionen ingår nu fler realistiska kontroll- och skyddskedjor,
+axial tvåfas-kanalsmodell för kokande reaktorer, trend-/sekvensvy i HMI och
+benchmark-envelope-validering med osäkerhetsband.
+
 ## macOS universal `.dmg`
 
-Repo:t har nu ett CI-flöde som bygger två `.app`-bundles (x86_64 + arm64), slår ihop dem till en universal `.app` och paketerar en DMG-artefakt.
+Repo:t har CI-flöde som bygger två `.app`-bundles (x86_64 + arm64), slår ihop dem till
+en universal `.app` och paketerar en DMG-artefakt.
 
 Kvar för en full distributionskedja för slutanvändare:
 
 1. **Kodsignering** av `.app` och `.dmg` (`codesign`, Developer ID).
 2. **Notarisering** + stapling (`notarytool` + `stapler`).
 3. **Releasepublicering** (t.ex. bifoga DMG till GitHub Release).
-## Vad som saknas för en fungerande **universell** `.dmg` (macOS)
-
-Just nu innehåller repot själva Python-koden, men ingen macOS-packetering. För en fungerande universal `.dmg` saknas i praktiken:
-
-1. **Byggsteg för `.app`-bundle**
-   - Lägg till t.ex. `pyinstaller` eller `py2app` i build-flödet.
-   - Projektet har i nuläget bara Python-paketmetadata i `pyproject.toml`, inte app-bundle-konfiguration.
-
-2. **Universal2-bygge (arm64 + x86_64)**
-   - Bygg på ett sätt som ger universal2-binär (eller bygg två varianter och slå ihop med `lipo` där det behövs).
-   - Säkerställ att Python-runtime och native beroenden (exempelvis `pygame`/SDL) också är universal2.
-
-3. **DMG-skapande**
-   - Lägg till steg/script för att skapa `.dmg` från `.app` (t.ex. `create-dmg`, `hdiutil` eller motsvarande CI-script).
-
-4. **Kodsignering**
-   - Signera `.app` och `.dmg` med Apple Developer ID-certifikat (`codesign`).
-
-5. **Notarisering + stapling**
-   - Skicka till Apple notarization (`notarytool`) och stapla ticket (`stapler`) så den fungerar utan Gatekeeper-varningar hos slutanvändare.
-
-6. **Release/CI-pipeline**
-   - Lägg till reproducerbar pipeline (GitHub Actions eller liknande) som bygger, testar, signerar, notariserar och bifogar `.dmg` till release.
-
-## Kort rekommenderad väg
-
-- Behåll `pyproject.toml` för Python-paket.
-- Lägg till ett separat `scripts/build_macos_universal.sh` som:
-  1) bygger `.app`,
-  2) verifierar arkitekturer (`lipo -info`),
-  3) signerar,
-  4) notariserar,
-  5) genererar `.dmg`.
-- Kör detta i CI på macOS-runner med certifikat/hemligheter.
