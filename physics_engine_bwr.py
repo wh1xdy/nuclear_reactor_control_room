@@ -165,6 +165,7 @@ class BWRParams:
     h_steam_to_turbine: float = 4.0e7
     turbine_efficiency: float = 0.33
     rod_worth: float = -0.06  # rods have slightly more worth in BWRs
+    scram_extra_worth: float = -0.12  # additional negative worth on full trip
     fuel_temp_coeff: float = -1.5e-5
     void_coeff: float = -0.07  # strong negative void reactivity (approx −7 pcm/% void)
     gamma_xe: float = 0.065
@@ -175,7 +176,7 @@ class BWRParams:
     nominal_fuel_temp: float = 600.0
     nominal_void_fraction: float = 0.4
     nominal_steam_temp: float = 540.0
-    internal_dt: float = 0.01
+    internal_dt: float = 0.001
 
 
 @dataclass
@@ -247,7 +248,7 @@ class PointKinetics:
         # Power fraction (neutron population relative to nominal)
         self.n = 1.0
         # Precursor concentrations for the six delayed neutron groups
-        self.c = [b / (p.Lambda_prompt * ld) for b, ld in zip(self.p.beta, self.p.lambda_d)]
+        self.c = [b / (self.p.Lambda_prompt * ld) for b, ld in zip(self.p.beta, self.p.lambda_d)]
 
     def reactivity_rhs(self, reactivity: float, n: float, c: List[float]) -> float:
         """Right‑hand side of the neutron balance equation.
@@ -321,6 +322,10 @@ class PointKinetics:
         self.n += dt * dn2
         for i in range(6):
             self.c[i] += dt * dc2[i]
+        if not math.isfinite(self.n):
+            self.n = 0.0
+        if self.n < 0.0:
+            self.n = 0.0
 
 
 class XenonIodine:
@@ -498,10 +503,17 @@ class BWRPlant:
         if controls.scram:
             self.scrammed = True
         rho_rods = rod_pos * self.p.rod_worth
+        if self.scrammed or controls.scram:
+            rho_rods += self.p.scram_extra_worth
         rho_fuel = self.p.fuel_temp_coeff * (self.thermal.T_fuel - self.p.nominal_fuel_temp)
         rho_void = self.p.void_coeff * (self.thermal.alpha - self.p.nominal_void_fraction)
         rho_xe = -self.p.xenon_reactivity_coeff * self.xenon.Xe
-        return rho_rods + rho_fuel + rho_void + rho_xe
+        rho = rho_rods + rho_fuel + rho_void + rho_xe
+        beta_total = sum(self.p.beta)
+        # Keep positive reactivity below delayed critical to avoid
+        # numerically-driven prompt excursions in this simplified model.
+        rho = max(-0.9, min(beta_total * 0.8, rho))
+        return rho
 
     def step(self, dt: float, controls: BWRControlInputs) -> BWRPlantSnapshot:
         """Advance the plant by dt seconds and return a snapshot.
