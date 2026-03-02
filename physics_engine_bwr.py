@@ -326,6 +326,9 @@ class PointKinetics:
             self.n = 0.0
         if self.n < 0.0:
             self.n = 0.0
+        if self.n > 20.0:
+            self.n = 20.0
+        self.n = max(0.0, min(5.0, self.n))
 
 
 class XenonIodine:
@@ -510,9 +513,7 @@ class BWRPlant:
         rho_xe = -self.p.xenon_reactivity_coeff * self.xenon.Xe
         rho = rho_rods + rho_fuel + rho_void + rho_xe
         beta_total = sum(self.p.beta)
-        # Keep positive reactivity below delayed critical to avoid
-        # numerically-driven prompt excursions in this simplified model.
-        rho = max(-0.9, min(beta_total * 0.8, rho))
+        rho = max(-0.9, min(beta_total * 1.5, rho))
         return rho
 
     def step(self, dt: float, controls: BWRControlInputs) -> BWRPlantSnapshot:
