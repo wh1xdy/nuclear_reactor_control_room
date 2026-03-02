@@ -9,7 +9,7 @@ En kontrollrumssimulator i Python/Pygame med tre reaktormodeller:
 Nu innehåller projektet också ett **supervisor-lager** som lägger till:
 
 - förenklad balance-of-plant (tryck, ånginventarie, kondensor, matarvatten),
-- skyddssystem (alarmer + automatiska trips/SCRAM),
+- skyddssystem (alarmer + automatiska trips/SCRAM med latch),
 - startinterlock (startup permit),
 - injicerbara fel (pumpdegradering, matarvattenförlust),
 - mer fysiknära void-dynamik i BWR/RBMK via tidsutvecklad käll/sänktermer.
@@ -41,6 +41,8 @@ python run_control_room.py
 - `T`: turbine trip (på/av)
 - `Z`: pumpfel (på/av)
 - `X`: matarvattenfel (på/av)
+- `C`: kvittera aktiva larm
+- `L`: återställ SCRAM-latch (om säkra villkor uppfylls)
 - `SHIFT`: snabb justering
 - `SPACE`: SCRAM
 - `R`: reset
