@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import pickle
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal
-from typing import Dict, List, Literal, Union
+from typing import Any, Deque, Dict, List, Literal, Optional, Tuple
 
 from physics_engine import ControlInputs as PWRControlInputs, PWRPlant
 from physics_engine_bwr import BWRControlInputs, BWRPlant
@@ -13,12 +14,69 @@ ReactorType = Literal["PWR", "BWR", "RBMK"]
 
 
 @dataclass
+class Alarm:
+    id: str
+    message: str
+    priority: int   # 1=emergency/trip, 2=warning, 3=advisory
+    time: float
+    state: str = "unack"   # "unack" | "ack" | "clear"
+    is_trip: bool = False
+    first_out: bool = False
+
+
+class AlarmManager:
+    """Priority alarm system with acknowledgement, latching, and event log."""
+
+    def __init__(self) -> None:
+        self._active: Dict[str, Alarm] = {}
+        self._first_out_id: Optional[str] = None
+        self.log: Deque[Tuple[float, str, str]] = deque(maxlen=500)  # (time, id, event)
+
+    def raise_alarm(self, id: str, priority: int, message: str, time: float, is_trip: bool = False) -> None:
+        if id not in self._active:
+            first_out = len(self._active) == 0
+            alarm = Alarm(id=id, message=message, priority=priority,
+                          time=time, state="unack", is_trip=is_trip, first_out=first_out)
+            self._active[id] = alarm
+            if first_out:
+                self._first_out_id = id
+            self.log.append((time, id, "raised"))
+
+    def clear_alarm(self, id: str) -> None:
+        if id in self._active:
+            t = self._active[id].time
+            del self._active[id]
+            self.log.append((t, id, "cleared"))
+            if self._first_out_id == id:
+                self._first_out_id = None
+
+    def acknowledge(self, id: str) -> None:
+        if id in self._active and self._active[id].state == "unack":
+            self._active[id].state = "ack"
+            self.log.append((self._active[id].time, id, "acknowledged"))
+
+    def acknowledge_all(self) -> None:
+        for alarm in self._active.values():
+            if alarm.state == "unack":
+                alarm.state = "ack"
+
+    def active_alarms(self) -> List[Alarm]:
+        return sorted(self._active.values(), key=lambda a: a.priority)
+
+    def clear_all(self) -> None:
+        self._active.clear()
+        self._first_out_id = None
+
+
+@dataclass
 class SupervisorControls:
     rod_position: float = 0.0
     flow: float = 1.0
     turbine_valve: float = 1.0
     feedwater_valve: float = 0.7
     pressurizer_heater: float = 0.5
+    boration_rate: float = 0.0
+    dilution_rate: float = 0.0
     startup_permit: bool = False
     turbine_trip: bool = False
     scram: bool = False
@@ -32,6 +90,7 @@ class BalanceOfPlantState:
     steam_inventory: float = 1.0
     condenser_temp_k: float = 305.0
     feedwater_inventory: float = 1.0
+    omega_rcp: float = 1.0       # RCP fractional speed (coast-down)
     alarms: List[str] = field(default_factory=list)
     trips: List[str] = field(default_factory=list)
 
@@ -54,6 +113,10 @@ class UnifiedSnapshot:
     feedwater_inventory: float
     alarms: List[str]
     trips: List[str]
+    decay_heat_fraction: float = 0.0
+    boron_ppm: float = 800.0
+    alarm_objects: List[Alarm] = field(default_factory=list)
+    scram_reset_message: str = ""
 
 
 class PlantSupervisor:
@@ -63,27 +126,85 @@ class PlantSupervisor:
         self.reactor_type: ReactorType = reactor_type
         self.controls = SupervisorControls()
         self.bop = BalanceOfPlantState()
+        self.alarm_mgr = AlarmManager()
+        self._sim_time: float = 0.0
+        self._scram_reset_message: str = ""
+        self._boron_ppm: float = 800.0      # PWR boron concentration
+        self.event_log: Deque[Tuple[float, str, str]] = deque(maxlen=500)
         self._init_plant()
 
     def _init_plant(self) -> None:
         if self.reactor_type == "PWR":
             self.plant = PWRPlant()
-            self.ctrl = PWRControlInputs()
             self.bop.pressure_mpa = 15.5
         elif self.reactor_type == "BWR":
             self.plant = BWRPlant()
-            self.ctrl = BWRControlInputs()
             self.bop.pressure_mpa = 7.0
         else:
             self.plant = RBMKPlant()
-            self.ctrl = RBMKControlInputs()
             self.bop.pressure_mpa = 7.0
+        self._init_ctrl()
+
+    def _init_ctrl(self) -> None:
+        if self.reactor_type == "PWR":
+            self.ctrl = PWRControlInputs()
+        elif self.reactor_type == "BWR":
+            self.ctrl = BWRControlInputs()
+        else:
+            self.ctrl = RBMKControlInputs()
 
     def select(self, reactor_type: ReactorType) -> None:
         self.reactor_type = reactor_type
         self.controls = SupervisorControls()
         self.bop = BalanceOfPlantState()
+        self.alarm_mgr.clear_all()
+        self._sim_time = 0.0
+        self._scram_reset_message = ""
+        self._boron_ppm = 800.0
         self._init_plant()
+
+    def reset_scram(self) -> str:
+        """Attempt to reset a latched SCRAM. Returns status message."""
+        if not self.controls.scram:
+            return "No SCRAM latched"
+        active_trips = [a for a in self.alarm_mgr.active_alarms() if a.is_trip]
+        if active_trips:
+            return f"RESET BLOCKED: trip active — {active_trips[0].message}"
+        if self.controls.rod_position < 0.95:
+            return "RESET BLOCKED: rods must be >95% inserted"
+        self.controls.scram = False
+        self.plant.scrammed = False
+        self.alarm_mgr.acknowledge_all()
+        self.event_log.append((self._sim_time, "SCRAM_RESET", "SCRAM reset approved by operator"))
+        return "SCRAM RESET APPROVED"
+
+    def acknowledge_alarms(self) -> None:
+        self.alarm_mgr.acknowledge_all()
+        self.event_log.append((self._sim_time, "ACK_ALL", "Operator acknowledged all alarms"))
+
+    def save_ic(self, path: str) -> None:
+        state = {
+            "reactor_type": self.reactor_type,
+            "controls": self.controls,
+            "bop": self.bop,
+            "plant": self.plant,
+            "sim_time": self._sim_time,
+            "boron_ppm": self._boron_ppm,
+        }
+        with open(path, "wb") as f:
+            pickle.dump(state, f)
+
+    def load_ic(self, path: str) -> None:
+        with open(path, "rb") as f:
+            state = pickle.load(f)
+        self.reactor_type = state["reactor_type"]
+        self.controls = state["controls"]
+        self.bop = state["bop"]
+        self.plant = state["plant"]
+        self._sim_time = state["sim_time"]
+        self._boron_ppm = state.get("boron_ppm", 800.0)
+        self.alarm_mgr.clear_all()
+        self._init_ctrl()
 
     def _mechanistic_void_step(self, dt: float) -> None:
         if self.reactor_type not in ("BWR", "RBMK"):
@@ -101,6 +222,19 @@ class PlantSupervisor:
         c = self.controls
         if c.fault_feedwater_loss:
             c.feedwater_valve = min(c.feedwater_valve, 0.1)
+
+        # RCP coast-down model
+        if c.fault_pump_degraded:
+            self.bop.omega_rcp += dt * (-self.bop.omega_rcp / 12.0)
+        else:
+            self.bop.omega_rcp += dt * (1.0 - self.bop.omega_rcp) / 30.0
+        self.bop.omega_rcp = max(0.04, min(1.0, self.bop.omega_rcp))  # nat. circ floor 4%
+
+        # PWR boron concentration (first-order mixing)
+        if self.reactor_type == "PWR":
+            V_primary = 300.0  # m³ (nominal PWR primary inventory)
+            d_boron = (c.boration_rate * 2000.0 - c.dilution_rate * self._boron_ppm) / V_primary
+            self._boron_ppm = max(0.0, min(4000.0, self._boron_ppm + d_boron * dt))
 
         steam_gen = thermal_power_w / 3.0e9
         turbine_draw = c.turbine_valve * (0.0 if c.turbine_trip else 1.0)
@@ -120,36 +254,58 @@ class PlantSupervisor:
         self.bop.feedwater_inventory = max(0.0, min(1.2, self.bop.feedwater_inventory))
 
     def _protection(self, snap: Dict[str, float]) -> None:
-        alarms: List[str] = []
-        trips: List[str] = []
+        t = self._sim_time
+        am = self.alarm_mgr
 
-        if snap["fuel_temp_k"] > 1200:
-            alarms.append("Fuel temperature high")
-        if self.bop.pressure_mpa > (16.2 if self.reactor_type == "PWR" else 7.8):
-            alarms.append("Reactor pressure high")
-        if self.bop.feedwater_inventory < 0.2:
-            alarms.append("Feedwater inventory low")
-        if self.bop.condenser_temp_k > 330:
-            alarms.append("Condenser temperature high")
-        if self.controls.fault_pump_degraded:
-            alarms.append("Primary pump degraded")
+        def warn(id: str, msg: str, cond: bool) -> None:
+            if cond:
+                am.raise_alarm(id, 2, msg, t, is_trip=False)
+            else:
+                am.clear_alarm(id)
 
-        if snap["fuel_temp_k"] > 1400:
-            trips.append("AUTO SCRAM: high fuel temperature")
-        if self.bop.pressure_mpa > (16.8 if self.reactor_type == "PWR" else 8.3):
-            trips.append("AUTO SCRAM: high reactor pressure")
+        def trip(id: str, msg: str, cond: bool) -> None:
+            if cond:
+                am.raise_alarm(id, 1, msg, t, is_trip=True)
+                self.controls.scram = True
+                self.event_log.append((t, "AUTO_SCRAM", msg))
+            else:
+                am.clear_alarm(id)
+
+        p_hi  = 16.2 if self.reactor_type == "PWR" else 7.8
+        p_trip = 16.8 if self.reactor_type == "PWR" else 8.3
+
+        warn("fuel_hi",      "Fuel temperature high",       snap["fuel_temp_k"] > 1200)
+        warn("press_hi",     "Reactor pressure high",       self.bop.pressure_mpa > p_hi)
+        warn("fw_lo",        "Feedwater inventory low",     self.bop.feedwater_inventory < 0.2)
+        warn("cond_hi",      "Condenser temperature high",  self.bop.condenser_temp_k > 330)
+        warn("pump_deg",     "Primary pump degraded",       self.controls.fault_pump_degraded)
+        warn("flux_hi",      "Neutron flux high",           snap["power_fraction"] > 1.1)
+        warn("coolant_hi",   "Coolant temperature high",    snap.get("coolant_temp_k", 0) > 610 and self.reactor_type == "PWR")
+        warn("flow_lo",      "Primary flow low",            self.bop.omega_rcp < 0.87 and self.reactor_type == "PWR")
+
+        trip("fuel_trip",    "AUTO SCRAM: high fuel temperature",  snap["fuel_temp_k"] > 1400)
+        trip("press_trip",   "AUTO SCRAM: high reactor pressure",  self.bop.pressure_mpa > p_trip)
+        trip("flux_trip",    "AUTO SCRAM: high neutron flux",      snap["power_fraction"] > 1.2)
+        trip("coolant_trip", "AUTO SCRAM: high coolant temperature",
+             snap.get("coolant_temp_k", 0) > 616 and self.reactor_type == "PWR")
+        trip("flow_trip",    "AUTO SCRAM: low primary flow",
+             self.bop.omega_rcp < 0.87 and not self.controls.fault_pump_degraded
+             and self.reactor_type == "PWR" and snap["power_fraction"] > 0.1)
+
         if self.controls.turbine_trip:
-            trips.append("Turbine trip active")
+            am.raise_alarm("tt", 2, "Turbine trip active", t, is_trip=False)
+        else:
+            am.clear_alarm("tt")
 
-        if trips:
-            self.controls.scram = True
-
-        self.bop.alarms = alarms
-        self.bop.trips = trips
+        active = self.alarm_mgr.active_alarms()
+        self.bop.alarms = [a.message for a in active if not a.is_trip]
+        self.bop.trips  = [a.message for a in active if a.is_trip]
 
     def step(self, dt: float) -> UnifiedSnapshot:
+        self._sim_time += dt
         c = self.controls
-        flow = c.flow * (0.6 if c.fault_pump_degraded else 1.0)
+        # Use RCP speed to scale flow (coast-down model); pump fault sets omega decay
+        flow = c.flow * self.bop.omega_rcp
         if not c.startup_permit:
             c.rod_position = max(c.rod_position, 0.85)
 
@@ -158,6 +314,8 @@ class PlantSupervisor:
             self.ctrl.primary_flow = flow
             self.ctrl.turbine_valve = 0.0 if c.turbine_trip else c.turbine_valve
             self.ctrl.scram = c.scram
+            # Inject boron reactivity: -8 pcm/ppm relative to 800 ppm nominal
+            self.plant.params.external_reactivity = -8e-5 * (self._boron_ppm - 800.0)
             base = self.plant.step(dt, self.ctrl)
             thermal_power_w = base.thermal_power
             snap = {
@@ -170,14 +328,15 @@ class PlantSupervisor:
                 "coolant_temp_k": base.coolant_temperature,
                 "steam_temp_k": base.sg_temperature,
                 "void_fraction": 0.0,
+                "decay_heat_fraction": self.plant.decay_heat.fraction,
             }
         elif self.reactor_type == "BWR":
-            self._mechanistic_void_step(dt)
             self.ctrl.rod_position = c.rod_position
             self.ctrl.recirc_pump = flow
             self.ctrl.turbine_valve = 0.0 if c.turbine_trip else c.turbine_valve
             self.ctrl.scram = c.scram
             base = self.plant.step(dt, self.ctrl)
+            self._mechanistic_void_step(dt)
             thermal_power_w = base.power_watts
             snap = {
                 "time": base.time,
@@ -188,15 +347,16 @@ class PlantSupervisor:
                 "fuel_temp_k": base.fuel_temperature,
                 "coolant_temp_k": base.coolant_temperature,
                 "steam_temp_k": base.steam_temperature,
-                "void_fraction": base.void_fraction,
+                "void_fraction": self.plant.thermal.alpha,
+                "decay_heat_fraction": self.plant.decay_heat.fraction,
             }
         else:
-            self._mechanistic_void_step(dt)
             self.ctrl.rod_position = c.rod_position
             self.ctrl.pump_speed = flow
             self.ctrl.turbine_valve = 0.0 if c.turbine_trip else c.turbine_valve
             self.ctrl.scram = c.scram
             base = self.plant.step(dt, self.ctrl)
+            self._mechanistic_void_step(dt)
             thermal_power_w = base.power_watts
             snap = {
                 "time": base.time,
@@ -207,16 +367,15 @@ class PlantSupervisor:
                 "fuel_temp_k": base.fuel_temperature,
                 "coolant_temp_k": base.coolant_temperature,
                 "steam_temp_k": base.steam_temperature,
-                "void_fraction": base.void_fraction,
+                "void_fraction": self.plant.thermal.alpha,
+                "decay_heat_fraction": self.plant.decay_heat.fraction,
             }
 
         self._update_bop(dt, thermal_power_w)
         self._protection(snap)
-        if c.scram:
-            self.plant.kinetics.n = min(self.plant.kinetics.n * 0.5, 0.15)
-            snap["power_fraction"] = self.plant.kinetics.n
-            snap["thermal_mw"] = snap["power_fraction"] * (3000.0 if self.reactor_type == "PWR" else (2700.0 if self.reactor_type == "BWR" else 3200.0))
 
+        msg = self._scram_reset_message
+        self._scram_reset_message = ""
         return UnifiedSnapshot(
             reactor_type=self.reactor_type,
             time=snap["time"],
@@ -234,4 +393,8 @@ class PlantSupervisor:
             feedwater_inventory=self.bop.feedwater_inventory,
             alarms=list(self.bop.alarms),
             trips=list(self.bop.trips),
+            decay_heat_fraction=snap["decay_heat_fraction"],
+            boron_ppm=self._boron_ppm,
+            alarm_objects=self.alarm_mgr.active_alarms(),
+            scram_reset_message=msg,
         )

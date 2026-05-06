@@ -57,6 +57,8 @@ import math
 from dataclasses import dataclass, field
 from typing import List
 
+from decay_heat import DecayHeat
+
 try:
     # We optionally support the IAPWS97 library for saturation
     # properties.  If it is available the steam node will use
@@ -166,6 +168,8 @@ class BWRParams:
     turbine_efficiency: float = 0.33
     rod_worth: float = -0.06  # rods have slightly more worth in BWRs
     scram_extra_worth: float = -0.12  # additional negative worth on full trip
+    # Time for hydraulic control blades to fully insert on SCRAM [s].
+    rod_drop_tau: float = 2.5
     fuel_temp_coeff: float = -1.5e-5
     void_coeff: float = -0.07  # strong negative void reactivity (approx −7 pcm/% void)
     gamma_xe: float = 0.065
@@ -464,8 +468,13 @@ class ThermalHydraulics:
         self.T_fuel += dt * ((Q_fuel - Q_fc) / self.p.fuel_heat_capacity)
         self.T_coolant += dt * ((Q_fc - Q_cs) / self.p.coolant_heat_capacity)
         self.T_steam += dt * ((Q_cs - Q_st) / self.p.steam_heat_capacity)
-        # Estimate new void fraction based on updated power and recirc_pump
-        self.alpha = self.estimate_void_fraction(power_fraction, controls.recirc_pump)
+        # Void fraction is managed externally by PlantSupervisor's mechanistic
+        # void model.  When running standalone, alpha stays at its initial value
+        # (nominal_void_fraction) or at whatever value was last set externally.
+        # First-order nudge toward static estimate so standalone runs are stable.
+        alpha_ss = self.estimate_void_fraction(power_fraction, controls.recirc_pump)
+        self.alpha += dt * (alpha_ss - self.alpha) / 30.0
+        self.alpha = max(0.0, min(0.95, self.alpha))
 
 
 class BWRPlant:
@@ -490,6 +499,8 @@ class BWRPlant:
         self.thermal = ThermalHydraulics(self.p)
         self.time = 0.0
         self.scrammed = False
+        self.rod_pos_effective: float = 0.0
+        self.decay_heat: DecayHeat = DecayHeat(initial_power=1.0)
 
     def compute_reactivity(self, controls: BWRControlInputs) -> float:
         """Compute the total reactivity [Δk/k] from controls and state.
@@ -500,13 +511,11 @@ class BWRPlant:
         increases the negative reactivity proportional to xenon
         inventory.  The sum of these terms is returned.
         """
-        # SCRAM forces rods fully inserted
-        rod_pos = 1.0 if self.scrammed or controls.scram else controls.rod_position
-        # Save latch if scram triggered
-        if controls.scram:
-            self.scrammed = True
-        rho_rods = rod_pos * self.p.rod_worth
-        if self.scrammed or controls.scram:
+        rod_pos = self.rod_pos_effective
+        # S-curve (integrated cosine) rod worth: w(x) = 3x²-2x³
+        w = 3.0 * rod_pos ** 2 - 2.0 * rod_pos ** 3
+        rho_rods = w * self.p.rod_worth
+        if self.scrammed:
             rho_rods += self.p.scram_extra_worth
         rho_fuel = self.p.fuel_temp_coeff * (self.thermal.T_fuel - self.p.nominal_fuel_temp)
         rho_void = self.p.void_coeff * (self.thermal.alpha - self.p.nominal_void_fraction)
@@ -523,22 +532,34 @@ class BWRPlant:
         maintain stability of the stiff kinetics equations.  The
         number of internal steps is the ceiling of dt/internal_dt.
         """
+        if controls.scram:
+            self.scrammed = True
         n_steps = max(1, int(math.ceil(dt / self.p.internal_dt)))
         sub_dt = dt / n_steps
         for _ in range(n_steps):
+            # Rod drop dynamics
+            if self.scrammed:
+                self.rod_pos_effective = min(
+                    1.0, self.rod_pos_effective + sub_dt / self.p.rod_drop_tau
+                )
+            else:
+                self.rod_pos_effective = max(0.0, min(1.0, controls.rod_position))
             # Compute reactivity from current state and control inputs
             rho = self.compute_reactivity(controls)
             # Advance kinetics
             self.kinetics.step(sub_dt, rho)
             # Update xenon inventory
             xe = self.xenon.step(sub_dt, self.kinetics.n)
+            # Advance decay heat and compute total effective power
+            decay_frac = self.decay_heat.step(sub_dt, self.kinetics.n)
+            effective_power = self.kinetics.n + decay_frac
             # Advance thermal hydraulics
-            self.thermal.step(sub_dt, self.kinetics.n, controls)
+            self.thermal.step(sub_dt, effective_power, controls)
             # Advance time
             self.time += sub_dt
         # Compute power and electric output
         power_fraction = self.kinetics.n
-        power_watts = power_fraction * self.p.nominal_power
+        power_watts = (self.kinetics.n + self.decay_heat.fraction) * self.p.nominal_power
         # Electric power from turbine heat removal
         # Approximate heat removal as Q_st from last substep
         # dT_st was computed in thermal model using previous state; we repeat for reporting
