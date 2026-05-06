@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 import pickle
+import random
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Literal, Optional, Tuple
@@ -69,6 +71,22 @@ class AlarmManager:
 
 
 @dataclass
+class AutoController:
+    """Simple proportional auto controller for one loop."""
+    auto: bool = False
+    setpoint: float = 0.0
+    Kp: float = 1.0
+    output_min: float = 0.0
+    output_max: float = 1.0
+
+    def compute(self, measurement: float) -> Optional[float]:
+        if not self.auto:
+            return None
+        err = self.setpoint - measurement
+        return min(self.output_max, max(self.output_min, 0.5 + self.Kp * err))
+
+
+@dataclass
 class SupervisorControls:
     rod_position: float = 0.0
     flow: float = 1.0
@@ -82,6 +100,7 @@ class SupervisorControls:
     scram: bool = False
     fault_pump_degraded: bool = False
     fault_feedwater_loss: bool = False
+    fault_loca_break_area: float = 0.0   # m²; 0 = no LOCA
 
 
 @dataclass
@@ -91,6 +110,8 @@ class BalanceOfPlantState:
     condenser_temp_k: float = 305.0
     feedwater_inventory: float = 1.0
     omega_rcp: float = 1.0       # RCP fractional speed (coast-down)
+    porv_open: bool = False       # pressurizer PORV status
+    eccs_actuated: bool = False   # ECCS injection active
     alarms: List[str] = field(default_factory=list)
     trips: List[str] = field(default_factory=list)
 
@@ -117,6 +138,10 @@ class UnifiedSnapshot:
     boron_ppm: float = 800.0
     alarm_objects: List[Alarm] = field(default_factory=list)
     scram_reset_message: str = ""
+    porv_open: bool = False
+    eccs_actuated: bool = False
+    loca_area: float = 0.0
+    channel_noise: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
 
 class PlantSupervisor:
@@ -131,6 +156,11 @@ class PlantSupervisor:
         self._scram_reset_message: str = ""
         self._boron_ppm: float = 800.0      # PWR boron concentration
         self.event_log: Deque[Tuple[float, str, str]] = deque(maxlen=500)
+        # 2-of-3 protection channel noise (fractional)
+        self._channel_noise: List[float] = [0.0, 0.0, 0.0]
+        # Auto controllers
+        self.auto_rod      = AutoController(setpoint=550.0, Kp=-0.006, output_min=0.0, output_max=1.0)
+        self.auto_pressure = AutoController(setpoint=15.5,  Kp=0.25,  output_min=0.0, output_max=1.0)
         self._init_plant()
 
     def _init_plant(self) -> None:
@@ -161,6 +191,8 @@ class PlantSupervisor:
         self._sim_time = 0.0
         self._scram_reset_message = ""
         self._boron_ppm = 800.0
+        self.auto_rod.auto = False
+        self.auto_pressure.auto = False
         self._init_plant()
 
     def reset_scram(self) -> str:
@@ -244,10 +276,38 @@ class PlantSupervisor:
         self.bop.steam_inventory = max(0.0, min(2.0, self.bop.steam_inventory))
 
         pressure_nom = 15.5 if self.reactor_type == "PWR" else 7.0
-        heater = c.pressurizer_heater if self.reactor_type == "PWR" else 0.2 * c.pressurizer_heater
-        dpress = 0.12 * (self.bop.steam_inventory - 1.0) + 0.09 * heater - 0.08 * turbine_draw
-        self.bop.pressure_mpa += dt * dpress
-        self.bop.pressure_mpa += dt * 0.1 * (pressure_nom - self.bop.pressure_mpa)
+
+        if self.reactor_type == "PWR":
+            # Pressurizer model: heater raises pressure, spray lowers it
+            # PORV at 16.55 MPa, SRV at 17.2 MPa
+            heater_dp = 0.12 * c.pressurizer_heater           # heater adds pressure
+            spray_dp  = -0.10 * max(0.0, c.pressurizer_heater - 0.8) * 5.0  # spray ~above 80%
+            steam_dp  = 0.08 * (self.bop.steam_inventory - 1.0)
+            self.bop.porv_open = self.bop.pressure_mpa > 16.55
+            porv_dp   = -0.40 if self.bop.porv_open else 0.0
+            srv_dp    = -1.20 if self.bop.pressure_mpa > 17.2  else 0.0
+            dpress = heater_dp + spray_dp + steam_dp + porv_dp + srv_dp
+            self.bop.pressure_mpa += dt * dpress
+            self.bop.pressure_mpa += dt * 0.06 * (pressure_nom - self.bop.pressure_mpa)
+
+            # LOCA: primary break depressurizes and drains inventory
+            A_break = c.fault_loca_break_area
+            if A_break > 0 and self.bop.pressure_mpa > 0.1:
+                dP_Pa = max(0.0, (self.bop.pressure_mpa - 0.1) * 1e6)
+                dp_loca = 45.0 * A_break * math.sqrt(dP_Pa / 1e6)  # MPa/s scale
+                self.bop.pressure_mpa -= dp_loca * dt
+                self.bop.pressure_mpa = max(0.1, self.bop.pressure_mpa)
+
+            # ECCS auto-actuates at 11.7 MPa
+            if self.bop.pressure_mpa < 11.7 and A_break > 0:
+                self.bop.eccs_actuated = True
+            elif self.bop.pressure_mpa > 14.0:
+                self.bop.eccs_actuated = False
+        else:
+            heater = 0.2 * c.pressurizer_heater
+            dpress = 0.12 * (self.bop.steam_inventory - 1.0) + 0.09 * heater - 0.08 * turbine_draw
+            self.bop.pressure_mpa += dt * dpress
+            self.bop.pressure_mpa += dt * 0.1 * (pressure_nom - self.bop.pressure_mpa)
 
         self.bop.condenser_temp_k += dt * (6.0 * turbine_draw - 0.06 * (self.bop.condenser_temp_k - 305.0))
         self.bop.feedwater_inventory += dt * (0.12 - 0.14 * feed)
@@ -256,6 +316,7 @@ class PlantSupervisor:
     def _protection(self, snap: Dict[str, float]) -> None:
         t = self._sim_time
         am = self.alarm_mgr
+        noise = self._channel_noise  # per-channel measurement noise (fractional)
 
         def warn(id: str, msg: str, cond: bool) -> None:
             if cond:
@@ -263,34 +324,57 @@ class PlantSupervisor:
             else:
                 am.clear_alarm(id)
 
-        def trip(id: str, msg: str, cond: bool) -> None:
+        def trip(id: str, msg: str, value: float, setpoint: float) -> None:
+            """2-of-3 channel voting trip."""
+            channels = [value * (1.0 + n) for n in noise]
+            votes = sum(1 for ch in channels if ch > setpoint)
+            cond = votes >= 2
             if cond:
                 am.raise_alarm(id, 1, msg, t, is_trip=True)
                 self.controls.scram = True
                 self.event_log.append((t, "AUTO_SCRAM", msg))
+                # Channel disagreement advisory
+                if votes < 3:
+                    am.raise_alarm(id + "_ch", 3, f"Protection channel split: {id}", t)
             else:
                 am.clear_alarm(id)
+                am.clear_alarm(id + "_ch")
 
-        p_hi  = 16.2 if self.reactor_type == "PWR" else 7.8
+        p_hi   = 16.2 if self.reactor_type == "PWR" else 7.8
         p_trip = 16.8 if self.reactor_type == "PWR" else 8.3
 
-        warn("fuel_hi",      "Fuel temperature high",       snap["fuel_temp_k"] > 1200)
-        warn("press_hi",     "Reactor pressure high",       self.bop.pressure_mpa > p_hi)
-        warn("fw_lo",        "Feedwater inventory low",     self.bop.feedwater_inventory < 0.2)
-        warn("cond_hi",      "Condenser temperature high",  self.bop.condenser_temp_k > 330)
-        warn("pump_deg",     "Primary pump degraded",       self.controls.fault_pump_degraded)
-        warn("flux_hi",      "Neutron flux high",           snap["power_fraction"] > 1.1)
-        warn("coolant_hi",   "Coolant temperature high",    snap.get("coolant_temp_k", 0) > 610 and self.reactor_type == "PWR")
-        warn("flow_lo",      "Primary flow low",            self.bop.omega_rcp < 0.87 and self.reactor_type == "PWR")
+        warn("fuel_hi",    "Fuel temperature high",      snap["fuel_temp_k"] > 1200)
+        warn("press_hi",   "Reactor pressure high",      self.bop.pressure_mpa > p_hi)
+        warn("fw_lo",      "Feedwater inventory low",    self.bop.feedwater_inventory < 0.2)
+        warn("cond_hi",    "Condenser temperature high", self.bop.condenser_temp_k > 330)
+        warn("pump_deg",   "Primary pump degraded",      self.controls.fault_pump_degraded)
+        warn("flux_hi",    "Neutron flux high",          snap["power_fraction"] > 1.1)
+        warn("coolant_hi", "Coolant temperature high",   snap.get("coolant_temp_k", 0) > 610 and self.reactor_type == "PWR")
+        warn("flow_lo",    "Primary flow low",           self.bop.omega_rcp < 0.87 and self.reactor_type == "PWR")
+        warn("porv",       "PORV open — pressure relief",self.bop.porv_open)
 
-        trip("fuel_trip",    "AUTO SCRAM: high fuel temperature",  snap["fuel_temp_k"] > 1400)
-        trip("press_trip",   "AUTO SCRAM: high reactor pressure",  self.bop.pressure_mpa > p_trip)
-        trip("flux_trip",    "AUTO SCRAM: high neutron flux",      snap["power_fraction"] > 1.2)
-        trip("coolant_trip", "AUTO SCRAM: high coolant temperature",
-             snap.get("coolant_temp_k", 0) > 616 and self.reactor_type == "PWR")
-        trip("flow_trip",    "AUTO SCRAM: low primary flow",
-             self.bop.omega_rcp < 0.87 and not self.controls.fault_pump_degraded
-             and self.reactor_type == "PWR" and snap["power_fraction"] > 0.1)
+        trip("fuel_trip",    "AUTO SCRAM: high fuel temperature",   snap["fuel_temp_k"],              1400.0)
+        trip("press_trip",   "AUTO SCRAM: high reactor pressure",   self.bop.pressure_mpa,            p_trip)
+        trip("flux_trip",    "AUTO SCRAM: high neutron flux",       snap["power_fraction"],            1.2)
+        if self.reactor_type == "PWR":
+            trip("coolant_trip", "AUTO SCRAM: high coolant temperature", snap.get("coolant_temp_k", 0), 616.0)
+            if self.bop.omega_rcp < 0.87 and not self.controls.fault_pump_degraded and snap["power_fraction"] > 0.1:
+                am.raise_alarm("flow_trip", 1, "AUTO SCRAM: low primary flow", t, is_trip=True)
+                self.controls.scram = True
+                self.event_log.append((t, "AUTO_SCRAM", "Low primary flow"))
+            else:
+                am.clear_alarm("flow_trip")
+
+        # LOCA and ECCS alarms
+        if self.controls.fault_loca_break_area > 0:
+            am.raise_alarm("loca", 1, "LOCA: primary boundary breach", t, is_trip=True)
+            self.controls.scram = True
+        else:
+            am.clear_alarm("loca")
+        if self.bop.eccs_actuated:
+            am.raise_alarm("eccs", 1, "ECCS INJECTION ACTIVE", t, is_trip=False)
+        else:
+            am.clear_alarm("eccs")
 
         if self.controls.turbine_trip:
             am.raise_alarm("tt", 2, "Turbine trip active", t, is_trip=False)
@@ -304,6 +388,18 @@ class PlantSupervisor:
     def step(self, dt: float) -> UnifiedSnapshot:
         self._sim_time += dt
         c = self.controls
+        # Refresh 2-of-3 channel noise each step
+        self._channel_noise = [random.gauss(0, 0.003) for _ in range(3)]
+        # Apply auto controllers (override operator inputs for active loops)
+        if self.reactor_type == "PWR":
+            rod_out = self.auto_rod.compute(
+                self.plant.thermal.T_cool if hasattr(self.plant, "thermal") else 550.0
+            )
+            if rod_out is not None:
+                c.rod_position = rod_out
+            press_out = self.auto_pressure.compute(self.bop.pressure_mpa)
+            if press_out is not None:
+                c.pressurizer_heater = press_out
         # Use RCP speed to scale flow (coast-down model); pump fault sets omega decay
         flow = c.flow * self.bop.omega_rcp
         if not c.startup_permit:
@@ -397,4 +493,8 @@ class PlantSupervisor:
             boron_ppm=self._boron_ppm,
             alarm_objects=self.alarm_mgr.active_alarms(),
             scram_reset_message=msg,
+            porv_open=self.bop.porv_open,
+            eccs_actuated=self.bop.eccs_actuated,
+            loca_area=c.fault_loca_break_area,
+            channel_noise=list(self._channel_noise),
         )
