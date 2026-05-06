@@ -46,6 +46,8 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from decay_heat import DecayHeat
+
 try:
     # If the iapws library is available, it can be used to compute
     # saturation temperatures and enthalpies for the steam generator.
@@ -124,6 +126,14 @@ class PlantParams:
     # [Δk/k].  A negative value means inserting rods decreases
     # reactivity.  0.05 corresponds to 5000 pcm.  Adjust as needed.
     rod_worth: float = -0.05
+    # Additional negative reactivity inserted on SCRAM (emergency boration
+    # and fast rod insertion combined) [Δk/k].  Makes total SCRAM worth
+    # consistent with BWR/RBMK models.
+    scram_extra_worth: float = -0.12
+    # Time for control rods to travel from their current position to
+    # fully inserted on SCRAM [s].  PWR rods fall by gravity; typical
+    # full-insertion time is about 2 s.
+    rod_drop_tau: float = 2.0
     # Temperature coefficients of reactivity [Δk/k per K].
     # These values are expressed in units of Δk/k and can be
     # interpreted as pcm per kelvin × 1e-5.  Negative values
@@ -154,7 +164,9 @@ class PlantParams:
     # stiff systems like point kinetics at the cost of CPU
     # time.  The default of 10 ms works well for time steps
     # on the order of 50 ms–100 ms.
-    internal_dt: float = 0.01
+    internal_dt: float = 0.001  # reduced to match BWR/RBMK for RK2 stability
+    # External reactivity bias injected each step (used for boron, instructor overrides, etc.)
+    external_reactivity: float = 0.0
 
 
 @dataclass
@@ -229,34 +241,43 @@ class PointKinetics:
             for i in range(len(params.beta))
         ]
 
-    def step(self, dt: float, rho: float) -> None:
-        """Advance the kinetics state by dt seconds.
-
-        Uses a simple Euler integration.  This is stable provided
-        the internal time step in the outer plant loop is small
-        (e.g. 10 ms to 20 ms).  The point kinetics equations are:
-
-            dn/dt = [(ρ - β) / Λ] * n + sum_i λ_i * C_i
-            dC_i/dt = (β_i / Λ) * n - λ_i * C_i
-
-        where β = sum β_i.
-        """
+    def _dn_dt(self, rho: float, n: float, C: List[float]) -> float:
         p = self.params
         beta_total = sum(p.beta)
-        # Neutron population rate of change
-        sum_lambda_C = 0.0
-        for lam, Ci in zip(p.lambda_d, self.C):
-            sum_lambda_C += lam * Ci
-        dn = ((rho - beta_total) / p.Lambda_prompt) * self.n + sum_lambda_C
-        # Precursor concentrations
-        dC = [0.0] * len(self.C)
-        for i in range(len(self.C)):
-            dC[i] = (p.beta[i] / p.Lambda_prompt) * self.n - p.lambda_d[i] * self.C[i]
-        # Euler update
-        self.n += dn * dt
-        for i in range(len(self.C)):
-            self.C[i] += dC[i] * dt
-        # Prevent unphysical negative populations
+        return ((rho - beta_total) / p.Lambda_prompt) * n + sum(l * c for l, c in zip(p.lambda_d, C))
+
+    def _dC_dt(self, n: float, C: List[float]) -> List[float]:
+        p = self.params
+        return [(p.beta[i] / p.Lambda_prompt) * n - p.lambda_d[i] * C[i] for i in range(len(C))]
+
+    def step(self, dt: float, rho: float) -> None:
+        """Advance the kinetics state by dt seconds using RK2 (midpoint).
+
+        For numerical stability when n is small (near shutdown), we
+        sub-divide the step further so that n_mid cannot go deeply negative.
+        """
+        beta_total = sum(self.params.beta)
+        # Stability criterion: dt_safe << n / |dn/dt|
+        # Use conservative fraction to avoid midpoint inversion
+        prompt_rate = abs(rho - beta_total) / self.params.Lambda_prompt
+        precursor_src = sum(l * c for l, c in zip(self.params.lambda_d, self.C))
+        dn_mag = prompt_rate * max(self.n, 1e-6) + abs(precursor_src)
+        n_for_stability = max(self.n, 1e-6)
+        dt_safe = 0.3 * n_for_stability / max(dn_mag, 1e-10)
+        n_sub = max(1, int(dt / min(dt, dt_safe)))
+        sub_dt = dt / n_sub
+        for _ in range(n_sub):
+            n0 = self.n
+            C0 = self.C[:]
+            dn1 = self._dn_dt(rho, n0, C0)
+            dC1 = self._dC_dt(n0, C0)
+            n_mid = n0 + 0.5 * sub_dt * dn1
+            C_mid = [C0[i] + 0.5 * sub_dt * dC1[i] for i in range(len(C0))]
+            dn2 = self._dn_dt(rho, n_mid, C_mid)
+            dC2 = self._dC_dt(n_mid, C_mid)
+            self.n += sub_dt * dn2
+            for i in range(len(self.C)):
+                self.C[i] += sub_dt * dC2[i]
         if self.n < 0.0:
             self.n = 0.0
 
@@ -379,6 +400,11 @@ class PWRPlant:
         self.thermal = ThermalHydraulics(self.params)
         self.time: float = 0.0
         self.scrammed: bool = False
+        # Effective rod position that moves gradually to 1.0 on SCRAM
+        # instead of teleporting, giving realistic rod-drop dynamics.
+        self.rod_pos_effective: float = 0.0
+        # Four-group fission product decay heat model.
+        self.decay_heat: DecayHeat = DecayHeat(initial_power=1.0)
 
     def _compute_reactivity(self, ctrl: ControlInputs) -> float:
         """Compute total reactivity (Δk/k) from control and feedback."""
@@ -386,8 +412,12 @@ class PWRPlant:
         # Rod contribution: fully withdrawn rods have 0 reactivity,
         # fully inserted rods have p.rod_worth reactivity.  If the
         # plant has been scrammed previously, force rod_position to 1.
-        rod_pos = 1.0 if self.scrammed or ctrl.scram else max(0.0, min(1.0, ctrl.rod_position))
-        rho_rods = rod_pos * p.rod_worth
+        rod_pos = self.rod_pos_effective
+        # S-curve (integrated cosine) rod worth: w(x) = 3x²-2x³
+        w = 3.0 * rod_pos ** 2 - 2.0 * rod_pos ** 3
+        rho_rods = w * p.rod_worth
+        if self.scrammed:
+            rho_rods += p.scram_extra_worth
         # Temperature feedback from fuel and coolant
         rho_temp = (
             p.fuel_temp_coeff * (self.thermal.T_fuel - p.nominal_fuel_temp)
@@ -396,7 +426,7 @@ class PWRPlant:
         # Xenon poisoning
         rho_xe = self.xenon.reactivity
         # Sum contributions
-        rho = rho_rods + rho_temp + rho_xe
+        rho = rho_rods + rho_temp + rho_xe + p.external_reactivity
         # Clamp to prevent numerical blow‑up.  The maximum reactivity
         # insertion should be well below prompt critical (β).
         beta_total = sum(p.beta)
@@ -413,14 +443,23 @@ class PWRPlant:
         n_steps = max(1, int(math.ceil(dt / p.internal_dt)))
         dt_sub = dt / n_steps
         for _ in range(n_steps):
+            # Rod drop dynamics: on SCRAM move rod_pos_effective toward 1.0
+            # linearly at rate 1/rod_drop_tau; otherwise track operator input.
+            if self.scrammed:
+                self.rod_pos_effective = min(
+                    1.0, self.rod_pos_effective + dt_sub / p.rod_drop_tau
+                )
+            else:
+                self.rod_pos_effective = max(0.0, min(1.0, ctrl.rod_position))
             # Compute reactivity for this substep
             rho = self._compute_reactivity(ctrl)
             # Step point kinetics
             self.kinetics.step(dt_sub, rho)
             # Step xenon model (uses current neutron population)
             self.xenon.step(dt_sub, self.kinetics.n)
-            # Calculate thermal power
-            P_th = self.kinetics.n * p.nominal_power
+            # Advance decay heat model; add to fission power for thermal load.
+            decay_frac = self.decay_heat.step(dt_sub, self.kinetics.n)
+            P_th = (self.kinetics.n + decay_frac) * p.nominal_power
             # Advance thermal hydraulics and get electric power
             self.thermal.step(dt_sub, P_th, ctrl)
             # Advance simulation time
@@ -429,14 +468,14 @@ class PWRPlant:
         snap = PlantSnapshot(
             time=self.time,
             power_fraction=self.kinetics.n,
-            thermal_power=self.kinetics.n * p.nominal_power,
+            thermal_power=(self.kinetics.n + self.decay_heat.fraction) * p.nominal_power,
             electric_power=self.thermal.electric_power,
             fuel_temperature=self.thermal.T_fuel,
             coolant_temperature=self.thermal.T_cool,
             sg_temperature=self.thermal.T_sg,
             reactivity=self._compute_reactivity(ctrl),
             xenon_inventory=self.xenon.X,
-            rod_position=1.0 if self.scrammed or ctrl.scram else ctrl.rod_position,
+            rod_position=self.rod_pos_effective,
             scrammed=self.scrammed,
         )
         return snap

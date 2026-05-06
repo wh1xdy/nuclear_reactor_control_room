@@ -53,6 +53,8 @@ import math
 from dataclasses import dataclass, field
 from typing import List
 
+from decay_heat import DecayHeat
+
 try:
     from iapws import IAPWS97
     HAVE_IAPWS = True
@@ -103,6 +105,9 @@ class RBMKParams:
     turbine_efficiency: float = 0.32
     rod_worth: float = -0.05  # control rods still negative
     scram_extra_worth: float = -0.12  # additional negative worth on full trip
+    # Time for RBMK control rods to fully insert on SCRAM [s].
+    # RBMK rods are motor/gravity driven and typically slower than PWR/BWR.
+    rod_drop_tau: float = 18.0
     fuel_temp_coeff: float = -1.0e-5  # negative doppler
     graphite_temp_coeff: float = -5.0e-6  # graphite also gives negative feedback
     void_coeff: float = +0.08  # positive void coefficient (≈ +8 pcm per % void)
@@ -265,8 +270,11 @@ class RBMKThermal:
         self.T_graphite += dt * ((Q_fg - Q_gw) / self.p.graphite_heat_capacity)
         self.T_coolant += dt * ((Q_gw - Q_ws) / self.p.coolant_heat_capacity)
         self.T_steam += dt * ((Q_ws - Q_st) / self.p.steam_heat_capacity)
-        # Update void fraction
-        self.alpha = self.estimate_void_fraction(power_fraction, controls.pump_speed)
+        # Void fraction is managed externally by PlantSupervisor's mechanistic
+        # void model.  First-order nudge toward static estimate for standalone runs.
+        alpha_ss = self.estimate_void_fraction(power_fraction, controls.pump_speed)
+        self.alpha += dt * (alpha_ss - self.alpha) / 30.0
+        self.alpha = max(0.0, min(0.9, self.alpha))
 
 
 class RBMKPlant:
@@ -279,14 +287,21 @@ class RBMKPlant:
         self.thermal = RBMKThermal(self.p)
         self.time = 0.0
         self.scrammed = False
+        self.rod_pos_effective: float = 0.0
+        self.decay_heat: DecayHeat = DecayHeat(initial_power=1.0)
 
     def compute_reactivity(self, controls: RBMKControlInputs) -> float:
-        rod_pos = 1.0 if self.scrammed or controls.scram else controls.rod_position
-        if controls.scram:
-            self.scrammed = True
-        rho_rods = rod_pos * self.p.rod_worth
-        if self.scrammed or controls.scram:
+        rod_pos = self.rod_pos_effective
+        # S-curve (integrated cosine) rod worth: w(x) = 3x²-2x³
+        w = 3.0 * rod_pos ** 2 - 2.0 * rod_pos ** 3
+        rho_rods = w * self.p.rod_worth
+        if self.scrammed:
             rho_rods += self.p.scram_extra_worth
+        # RBMK graphite displacer tip positive reactivity spike:
+        # when rods begin inserting (scrammed, tip-first entry 0–20%),
+        # graphite displaces water before absorber portion enters core.
+        if self.scrammed and rod_pos < 0.2:
+            rho_rods += 0.014 * (0.2 - rod_pos) / 0.2
         rho_fuel = self.p.fuel_temp_coeff * (self.thermal.T_fuel - self.p.nominal_fuel_temp)
         rho_graphite = self.p.graphite_temp_coeff * (self.thermal.T_graphite - self.p.nominal_graphite_temp)
         rho_void = self.p.void_coeff * (self.thermal.alpha - self.p.nominal_void_fraction)
@@ -297,16 +312,27 @@ class RBMKPlant:
         return rho
 
     def step(self, dt: float, controls: RBMKControlInputs) -> RBMKPlantSnapshot:
+        if controls.scram:
+            self.scrammed = True
         n_steps = max(1, int(math.ceil(dt / self.p.internal_dt)))
         sub_dt = dt / n_steps
         for _ in range(n_steps):
+            # Rod drop dynamics
+            if self.scrammed:
+                self.rod_pos_effective = min(
+                    1.0, self.rod_pos_effective + sub_dt / self.p.rod_drop_tau
+                )
+            else:
+                self.rod_pos_effective = max(0.0, min(1.0, controls.rod_position))
             rho = self.compute_reactivity(controls)
             self.kinetics.step(sub_dt, rho)
             self.xenon.step(sub_dt, self.kinetics.n)
-            self.thermal.step(sub_dt, self.kinetics.n, controls)
+            decay_frac = self.decay_heat.step(sub_dt, self.kinetics.n)
+            effective_power = self.kinetics.n + decay_frac
+            self.thermal.step(sub_dt, effective_power, controls)
             self.time += sub_dt
         power_fraction = self.kinetics.n
-        power_watts = power_fraction * self.p.nominal_power
+        power_watts = (self.kinetics.n + self.decay_heat.fraction) * self.p.nominal_power
         # Compute electric power from last Q_st
         dT_st = self.thermal.T_steam - (self.p.nominal_steam_temp - 50.0)
         Q_st = self.p.h_steam_to_turbine * controls.turbine_valve * dT_st
