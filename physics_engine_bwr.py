@@ -501,6 +501,9 @@ class BWRPlant:
         self.scrammed = False
         self.rod_pos_effective: float = 0.0
         self.decay_heat: DecayHeat = DecayHeat(initial_power=1.0)
+        # Density wave: first-order lag (τ≈2s) on power→void coupling
+        # Creates delayed void feedback → mild oscillatory tendency at low flow
+        self._void_drive: float = self.p.nominal_void_fraction
 
     def compute_reactivity(self, controls: BWRControlInputs) -> float:
         """Compute the total reactivity [Δk/k] from controls and state.
@@ -544,6 +547,14 @@ class BWRPlant:
                 )
             else:
                 self.rod_pos_effective = max(0.0, min(1.0, controls.rod_position))
+            # Density wave: update void_drive with 2s lag on kinetics.n→void
+            tau_dw = 2.0
+            void_target = self.p.nominal_void_fraction * self.kinetics.n / max(0.001, controls.recirc_pump)
+            void_target = max(0.0, min(0.95, void_target))
+            self._void_drive += sub_dt * (void_target - self._void_drive) / tau_dw
+            # Nudge thermal alpha toward void_drive (slowly, so fast supervisor model can override)
+            self.thermal.alpha += sub_dt * (self._void_drive - self.thermal.alpha) / 5.0
+            self.thermal.alpha = max(0.0, min(0.95, self.thermal.alpha))
             # Compute reactivity from current state and control inputs
             rho = self.compute_reactivity(controls)
             # Advance kinetics

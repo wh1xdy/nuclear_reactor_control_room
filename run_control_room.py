@@ -517,6 +517,8 @@ def draw_screen_primary(screen, snap, supervisor, fonts, layout, blink_fast):
 
     # DCS readout grid
     box_y = cy2 + 20 + bm_h2 + 40
+    porv_str = "OPEN" if snap.porv_open else "SHUT"
+    eccs_str = "ACTIVE" if snap.eccs_actuated else "STANDBY"
     box_defs = [
         ("Core power", f"{snap.power_fraction*100:.2f} %",  C_GREEN if snap.power_fraction < 1.1 else C_RED),
         ("Pressure",   f"{snap.pressure_mpa:.3f} MPa",      C_GREEN if snap.pressure_mpa < pnom*1.04 else C_YELLOW),
@@ -524,6 +526,8 @@ def draw_screen_primary(screen, snap, supervisor, fonts, layout, blink_fast):
         ("Coolant T",  f"{snap.coolant_temp_k:.1f} K",      C_GREEN if snap.coolant_temp_k < 580 else C_YELLOW),
         ("RCP speed",  f"{supervisor.bop.omega_rcp*100:.1f} %",
          C_GREEN if supervisor.bop.omega_rcp > 0.90 else C_ORANGE),
+        ("PORV",       porv_str,  C_ORANGE if snap.porv_open else C_GREEN),
+        ("ECCS",       eccs_str,  C_RED if snap.eccs_actuated else C_TEXT_DIM),
         ("Reactivity", f"{snap.reactivity:+.5f}",           C_GREEN if abs(snap.reactivity) < 0.001 else C_YELLOW),
     ]
     bw3, bh3 = 200, 52
@@ -644,11 +648,11 @@ def draw_screen_alarms(screen, snap, supervisor, fonts, layout, blink_fast, blin
 
 
 def draw_screen_ic(screen, snap, fonts, layout, blink_fast):
-    """F5: I&C / protection channel status."""
+    """F5: I&C / protection channels — real 2-of-3 voting display."""
     font_sm, font, font_md, font_lg, font_xl = fonts
     cx, cy, cw, rp_x, rp_w, body_h = layout
     full_w = cw + rp_w + 8
-    cy2 = draw_panel(screen, cx, cy, full_w, body_h, "I&C / PROTECTION CHANNELS", font_sm)
+    cy2 = draw_panel(screen, cx, cy, full_w, body_h, "I&C / PROTECTION CHANNELS  (2-of-3 voting)", font_sm)
 
     pnom = 15.5 if snap.reactor_type == "PWR" else 7.0
     params = [
@@ -657,20 +661,24 @@ def draw_screen_ic(screen, snap, fonts, layout, blink_fast):
         ("Reactor pressure",  snap.pressure_mpa,         "MPa", pnom * 1.08, pnom * 1.1),
         ("Coolant temp",      snap.coolant_temp_k,       "K",   610.0,  616.0),
     ]
-    row_h = 60
+    noise = snap.channel_noise  # live noise from supervisor
+    row_h = 65
     for ri, (param_name, value, unit, warn_sp, trip_sp) in enumerate(params):
         py = cy2 + ri * (row_h + 8)
         screen.blit(font_md.render(param_name, True, C_TEXT_HDR), (cx + 10, py + 4))
-        val_str = f"{value:.2f} {unit}"
+        val_str = f"{value:.3f} {unit}"
         warn_ok = value < warn_sp if warn_sp else True
         col = C_GREEN if warn_ok else (C_YELLOW if not trip_sp or value < trip_sp else C_RED)
         screen.blit(font_md.render(val_str, True, col), (cx + 280, py + 4))
 
-        # 3-channel display (simulated with noise)
-        for ch_i, noise in enumerate([-0.005, 0.0, +0.005]):
-            ch_val = value * (1 + noise)
-            ch_x = cx + 500 + ch_i * 180
-            ch_str = f"Ch {chr(65+ch_i)}: {ch_val:.2f}"
+        # Real 2-of-3 channel display using live noise
+        ch_vals = [value * (1.0 + n) for n in noise]
+        votes = sum(1 for v in ch_vals if trip_sp and v > trip_sp)
+        vote_col = C_RED if votes >= 2 else C_YELLOW if votes == 1 else C_TEXT_DIM
+        screen.blit(font_sm.render(f"Votes: {votes}/3", True, vote_col), (cx + 480, py + 4))
+        for ch_i, ch_val in enumerate(ch_vals):
+            ch_x = cx + 560 + ch_i * 160
+            ch_str = f"Ch {chr(65+ch_i)}: {ch_val:.3f}"
             ch_col = C_GREEN
             if warn_sp and ch_val > warn_sp:
                 ch_col = C_YELLOW
@@ -678,8 +686,9 @@ def draw_screen_ic(screen, snap, fonts, layout, blink_fast):
                 ch_col = C_RED
             screen.blit(font.render(ch_str, True, ch_col), (ch_x, py + 4))
 
-        setpt_str = f"Warn: {warn_sp:.2f}  Trip: {trip_sp:.2f}" if trip_sp else f"Warn: {warn_sp:.2f}"
-        screen.blit(font_sm.render(setpt_str, True, C_TEXT_DIM), (cx + 10, py + 28))
+        setpt_str = (f"Warn: {warn_sp:.2f} {unit}  Trip: {trip_sp:.2f} {unit}"
+                     if trip_sp else f"Warn: {warn_sp:.2f} {unit}")
+        screen.blit(font_sm.render(setpt_str, True, C_TEXT_DIM), (cx + 10, py + 30))
         pygame.draw.line(screen, C_BORDER, (cx + 10, py + row_h + 2), (cx + full_w - 10, py + row_h + 2))
 
 
@@ -832,6 +841,21 @@ def main():
                 elif ev.key == pygame.K_p:          controls.startup_permit       = not controls.startup_permit
                 elif ev.key == pygame.K_z:          controls.fault_pump_degraded  = not controls.fault_pump_degraded
                 elif ev.key == pygame.K_x:          controls.fault_feedwater_loss = not controls.fault_feedwater_loss
+                elif ev.key == pygame.K_i:
+                    # Cycle LOCA break area: 0 → 0.001 → 0.01 → 0
+                    LOCA_AREAS = [0.0, 0.001, 0.01]
+                    cur = controls.fault_loca_break_area
+                    idx_next = (LOCA_AREAS.index(min(LOCA_AREAS, key=lambda a: abs(a - cur))) + 1) % len(LOCA_AREAS)
+                    controls.fault_loca_break_area = LOCA_AREAS[idx_next]
+                    supervisor.event_log.append((snapshot.time, "INSTRUCTOR", f"LOCA break area set to {LOCA_AREAS[idx_next]} m²"))
+                elif ev.key == pygame.K_o:
+                    if supervisor.reactor_type == "PWR":
+                        supervisor.auto_rod.auto = not supervisor.auto_rod.auto
+                        supervisor.event_log.append((snapshot.time, "AUTO_CTRL", f"Auto rod: {'ON' if supervisor.auto_rod.auto else 'OFF'}"))
+                elif ev.key == pygame.K_m:
+                    if supervisor.reactor_type == "PWR":
+                        supervisor.auto_pressure.auto = not supervisor.auto_pressure.auto
+                        supervisor.event_log.append((snapshot.time, "AUTO_CTRL", f"Auto pressure: {'ON' if supervisor.auto_pressure.auto else 'OFF'}"))
                 elif ev.key == pygame.K_l:
                     scram_msg = supervisor.reset_scram()
                     scram_msg_timer = 4.0
@@ -888,6 +912,12 @@ def main():
         dt = real_dt * effective_speed
 
         snapshot = supervisor.step(dt)
+
+        # Sync sliders to auto controller outputs so display tracks correctly
+        if supervisor.auto_rod.auto and supervisor.reactor_type == "PWR":
+            rod.set(controls.rod_position)
+        if supervisor.auto_pressure.auto and supervisor.reactor_type == "PWR":
+            press.set(controls.pressurizer_heater)
         hist_power.append(snapshot.power_fraction * 100.0)
         hist_fuel.append(snapshot.fuel_temp_k)
         hist_react.append(snapshot.reactivity)
@@ -998,6 +1028,7 @@ def main():
             ("Turbine trip",    controls.turbine_trip,         C_ORANGE, "T"),
             ("Pump degraded",   controls.fault_pump_degraded,  C_RED,    "Z"),
             ("Feedwater fault", controls.fault_feedwater_loss, C_RED,    "X"),
+            ("LOCA fault",      controls.fault_loca_break_area > 0, C_RED, "I"),
         ]:
             led_col = col_on if state else (30, 38, 52)
             draw_led(screen, LP_X + 22, cy + 8, led_col)
@@ -1027,6 +1058,32 @@ def main():
             cy += 18
         if ic_msg and ic_msg_timer > 0:
             screen.blit(font_sm.render(ic_msg, True, C_ACCENT), (LP_X + 12, cy))
+            cy += 18
+
+        # PORV / ECCS status (PWR only)
+        if snapshot.reactor_type == "PWR":
+            if snapshot.porv_open:
+                draw_led(screen, LP_X + 22, cy + 8, C_ORANGE if blink_fast else (100, 55, 0))
+                screen.blit(font_sm.render("PORV OPEN", True, C_ORANGE), (LP_X + 40, cy + 2))
+                cy += 20
+            if snapshot.eccs_actuated:
+                draw_led(screen, LP_X + 22, cy + 8, C_RED if blink_fast else (80, 0, 0))
+                screen.blit(font_sm.render("ECCS ACTUATED", True, C_RED), (LP_X + 40, cy + 2))
+                cy += 20
+            if snapshot.loca_area > 0:
+                screen.blit(font_sm.render(f"LOCA {snapshot.loca_area*10000:.0f}cm²",
+                                           True, C_RED), (LP_X + 12, cy))
+                cy += 18
+
+        # Auto controller indicators (PWR only)
+        if snapshot.reactor_type == "PWR":
+            auto_rod_col  = C_ACCENT if supervisor.auto_rod.auto      else C_TEXT_DIM
+            auto_pres_col = C_ACCENT if supervisor.auto_pressure.auto  else C_TEXT_DIM
+            screen.blit(font_sm.render(f"[O] Auto rod:  {'AUTO' if supervisor.auto_rod.auto else 'MAN '}",
+                                       True, auto_rod_col), (LP_X + 12, cy))
+            cy += 16
+            screen.blit(font_sm.render(f"[M] Auto pzr:  {'AUTO' if supervisor.auto_pressure.auto else 'MAN '}",
+                                       True, auto_pres_col), (LP_X + 12, cy))
 
         # ── Trend data selection ──────────────────────────────────────────────
         tw_label, tw_len = TIME_WINDOWS[time_window_idx]
@@ -1060,7 +1117,8 @@ def main():
         pygame.draw.line(screen, C_BORDER, (0, help_y - 3), (W, help_y - 3))
         screen.blit(font_sm.render(
             "W/S:rods  A/D:flow  Q/E:turbine  F/V:feed  H/N:pzr  B/G:borate  SHIFT:fast  "
-            "1/2/3:reactor  SPACE:SCRAM  L:reset  C:ack  [/]:window  +/-:speed  Ctrl+S:save  F1-F6:tabs  ESC:quit",
+            "O:auto-rod  M:auto-pzr  I:LOCA  1/2/3:reactor  SPACE:SCRAM  L:reset  C:ack  "
+            "[/]:window  +/-:speed  Ctrl+S:save  F1-F6:tabs  ESC:quit",
             True, C_TEXT_DIM,
         ), (10, help_y))
 
