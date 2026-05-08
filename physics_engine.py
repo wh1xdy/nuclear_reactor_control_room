@@ -259,6 +259,8 @@ class PointKinetics:
 
         Uses pre-allocated working arrays to avoid per-substep list creation.
         """
+        if dt <= 0.0:
+            return
         p = self.params
         lam = p.lambda_d
         bet = p.beta
