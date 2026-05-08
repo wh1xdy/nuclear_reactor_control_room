@@ -90,7 +90,7 @@ class PlantParams:
     ])
     # Prompt neutron generation time Λ [s].  Typical values for light
     # water reactors are around 10‑4 s【970620566235039†L37-L44】.
-    Lambda_prompt: float = 1.0e-4
+    Lambda_prompt: float = 2.0e-5  # PWR thermal spectrum: ~20 µs
     # Nominal thermal power of the reactor [W].  A typical PWR is
     # around 3000 MW thermal.  This value sets the scale for all
     # energy flows.
@@ -142,13 +142,13 @@ class PlantParams:
     # a few pcm/K.  The defaults here correspond to −2 pcm/K for
     # fuel and −5 pcm/K for coolant.
     fuel_temp_coeff: float = -2e-5
-    coolant_temp_coeff: float = -5e-5
+    coolant_temp_coeff: float = -3e-4  # PWR moderator temp coeff: ~−20 to −50 pcm/K
     # Xenon dynamics parameters.  gamma_xe is the effective
     # production rate of xenon (including the branching ratio from
     # fission to I‑135, the yield of I‑135 and the conversion to Xe‑135).
     gamma_xe: float = 0.065  # fraction of fissions producing I‑135
-    lambda_I: float = 1.0 / (6.6 * 3600)  # I‑135 half life ~ 6.6 h
-    lambda_Xe: float = 1.0 / (9.2 * 3600)  # Xe‑135 half life ~ 9.2 h
+    lambda_I: float = 0.6931 / (6.57 * 3600)   # I-135: λ = ln2/t½, t½ = 6.57 h
+    lambda_Xe: float = 0.6931 / (9.17 * 3600)  # Xe-135: λ = ln2/t½, t½ = 9.17 h
     xenon_burn_coeff: float = 0.08  # effective burn rate per unit power
     xenon_reactivity_coeff: float = 0.02  # Δk/k per unit xenon inventory
     # Nominal temperatures [K].  These reference values define
