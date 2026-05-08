@@ -157,7 +157,7 @@ class BWRParams:
         1.14,
         3.01,
     ])
-    Lambda_prompt: float = 1.5e-4  # slightly higher than PWR due to direct steam production
+    Lambda_prompt: float = 4.0e-5  # BWR thermal spectrum: ~40 µs
     nominal_power: float = 2.7e9
     fuel_heat_capacity: float = 8.0e7
     coolant_heat_capacity: float = 5.0e7
@@ -171,10 +171,10 @@ class BWRParams:
     # Time for hydraulic control blades to fully insert on SCRAM [s].
     rod_drop_tau: float = 2.5
     fuel_temp_coeff: float = -1.5e-5
-    void_coeff: float = -0.07  # strong negative void reactivity (approx −7 pcm/% void)
+    void_coeff: float = -0.15  # BWR void reactivity: ~−100 to −200 pcm/% void = −0.10 to −0.20 per unit fraction
     gamma_xe: float = 0.065
-    lambda_I: float = 1.0 / (6.6 * 3600)
-    lambda_Xe: float = 1.0 / (9.2 * 3600)
+    lambda_I: float = 0.6931 / (6.57 * 3600)   # I-135: λ = ln2/t½
+    lambda_Xe: float = 0.6931 / (9.17 * 3600)  # Xe-135: λ = ln2/t½
     xenon_burn_coeff: float = 0.08
     xenon_reactivity_coeff: float = 0.02
     nominal_fuel_temp: float = 600.0

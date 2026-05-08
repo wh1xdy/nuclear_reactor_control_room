@@ -530,11 +530,10 @@ def draw_screen_primary(screen, snap, supervisor, fonts, layout, blink_fast):
         ("ECCS",       eccs_str,  C_RED if snap.eccs_actuated else C_TEXT_DIM),
         ("Reactivity", f"{snap.reactivity:+.5f}",           C_GREEN if abs(snap.reactivity) < 0.001 else C_YELLOW),
     ]
-    bw3, bh3 = 200, 52
+    bw3, bh3 = 182, 52  # 8 boxes × (182+10) = 1536, fits in cx+cw+rp_w=1546 with 10px margin
     for i, (lbl3, val3, col3) in enumerate(box_defs):
-        bx3 = cx + 20 + i * (bw3 + 12)
-        if bx3 + bw3 < cx + cw + rp_w:
-            draw_dcs_box(screen, bx3, box_y, bw3, bh3, lbl3, val3, col3, font_sm, font_md)
+        bx3 = cx + 20 + i * (bw3 + 10)
+        draw_dcs_box(screen, bx3, box_y, bw3, bh3, lbl3, val3, col3, font_sm, font_md)
 
 
 def draw_screen_secondary(screen, snap, fonts, layout, blink_fast):
