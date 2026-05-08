@@ -177,7 +177,7 @@ class BWRParams:
     lambda_Xe: float = 0.6931 / (9.17 * 3600)  # Xe-135: λ = ln2/t½
     xenon_burn_coeff: float = 0.08
     xenon_reactivity_coeff: float = 0.02
-    nominal_fuel_temp: float = 600.0
+    nominal_fuel_temp: float = 800.0  # BWR average fuel temp at full power ~800 K
     nominal_void_fraction: float = 0.4
     nominal_steam_temp: float = 540.0
     internal_dt: float = 0.01   # thermal/xenon substep; kinetics RK2 is sub-stepped adaptively
