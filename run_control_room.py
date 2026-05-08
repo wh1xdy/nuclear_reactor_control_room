@@ -52,15 +52,18 @@ class Slider:
 
 def draw_panel(screen, x, y, w, h, title=None, font=None, border_color=None):
     bc = border_color or C_BORDER
-    pygame.draw.rect(screen, C_PANEL, (x, y, w, h), border_radius=8)
-    pygame.draw.rect(screen, bc,      (x, y, w, h), 1, border_radius=8)
+    pygame.draw.rect(screen, C_PANEL, (x, y, w, h), border_radius=3)
+    pygame.draw.rect(screen, bc,      (x, y, w, h), 1, border_radius=3)
     if title and font:
         lbl   = font.render(title, True, C_TEXT_HDR)
-        sep_y = y + 7 + lbl.get_height() + 5
-        screen.blit(lbl, (x + 14, y + 7))
-        pygame.draw.line(screen, bc, (x + 8, sep_y), (x + w - 8, sep_y))
-        return sep_y + 8
-    return y + 10
+        title_h = lbl.get_height()
+        # Title bar: filled strip for industrial DCS look
+        pygame.draw.rect(screen, (18, 28, 48), (x + 1, y + 1, w - 2, title_h + 10), border_radius=2)
+        sep_y = y + 5 + title_h + 6
+        screen.blit(lbl, (x + 14, y + 5))
+        pygame.draw.line(screen, bc, (x + 1, sep_y), (x + w - 1, sep_y))
+        return sep_y + 6
+    return y + 8
 
 
 def draw_led(screen, cx, cy, color, radius=7):
@@ -131,8 +134,10 @@ def draw_bar_meter(screen, x, y, w, h, value, lo, hi, font,
 
 def draw_dcs_box(screen, x, y, w, h, label, value_str, col, font_lbl, font_val):
     """DCS-style digital readout box."""
-    pygame.draw.rect(screen, (6, 9, 14), (x, y, w, h), border_radius=4)
-    pygame.draw.rect(screen, C_BORDER,   (x, y, w, h), 1, border_radius=4)
+    pygame.draw.rect(screen, (6, 9, 14), (x, y, w, h), border_radius=2)
+    pygame.draw.rect(screen, C_BORDER,   (x, y, w, h), 1, border_radius=2)
+    # Title strip
+    pygame.draw.rect(screen, (14, 20, 32), (x + 1, y + 1, w - 2, 16), border_radius=1)
     lbl = font_lbl.render(label, True, C_TEXT_DIM)
     val = font_val.render(value_str, True, col)
     screen.blit(lbl, (x + 6, y + 4))
@@ -420,7 +425,7 @@ def draw_screen_overview(screen, snap, fonts, layout, blink_fast, blink_slow, co
         uw  = font_sm.size(unit)[0]
         screen.blit(vs,  (cx + cw - uw - vs.get_width() - 18, ry - 1))
         screen.blit(font_sm.render(unit, True, C_TEXT_DIM), (cx + cw - uw - 10, ry + 2))
-        ry += 22
+        ry += 26
 
     def rsep():
         nonlocal ry
@@ -705,43 +710,77 @@ def draw_screen_reactivity(screen, snap, fonts, layout, p_data, f_data):
         orm_skala = snap.skala_orm
         age_min   = snap.skala_age_s / 60.0
 
-        # Colour coding by severity
-        if orm_live < 15:
-            orm_col = C_RED
-        elif orm_live < 26:
-            orm_col = C_YELLOW
-        else:
-            orm_col = C_GREEN
+        if orm_live < 15:   orm_col = C_RED
+        elif orm_live < 26: orm_col = C_YELLOW
+        else:               orm_col = C_GREEN
 
         orm_panel_y = cy2
-        orm_panel_h = 80
-        pygame.draw.rect(screen, (20, 20, 30), (cx + 8, orm_panel_y, full_w - 16, orm_panel_h), border_radius=4)
-        pygame.draw.rect(screen, C_TEXT_DIM,   (cx + 8, orm_panel_y, full_w - 16, orm_panel_h), 1, border_radius=4)
+        orm_panel_h = 90
+        pw = full_w - 16
 
-        screen.blit(font_sm.render("OPERATIONAL REACTIVITY MARGIN  (SKALA/PRIZMA)", True, C_TEXT_HDR),
-                    (cx + 16, orm_panel_y + 6))
+        # Panel background with title strip
+        pygame.draw.rect(screen, (10, 14, 22), (cx + 8, orm_panel_y, pw, orm_panel_h), border_radius=2)
+        pygame.draw.rect(screen, (40, 60, 100),(cx + 8, orm_panel_y, pw, 18), border_radius=2)
+        pygame.draw.rect(screen, (40, 60, 100),(cx + 8, orm_panel_y, pw, orm_panel_h), 1, border_radius=2)
+        screen.blit(font_sm.render("СКАЛА — OPERATIONAL REACTIVITY MARGIN  (ORM / ОРМ)", True, (180, 200, 240)),
+                    (cx + 16, orm_panel_y + 3))
 
-        # Real-time ORM (large number)
-        rt_label = font_sm.render("LIVE ORM", True, C_TEXT_DIM)
-        rt_val   = font_lg.render(f"{orm_live:.1f}", True, orm_col)
-        rt_unit  = font_sm.render("rods equiv.", True, C_TEXT_DIM)
-        screen.blit(rt_label, (cx + 16, orm_panel_y + 24))
-        screen.blit(rt_val,   (cx + 16, orm_panel_y + 36))
-        screen.blit(rt_unit,  (cx + 16 + rt_val.get_width() + 6, orm_panel_y + 48))
+        # ── Live ORM gauge box ──
+        gx, gy, gw, gh = cx + 16, orm_panel_y + 22, 200, 62
+        pygame.draw.rect(screen, (6, 8, 14), (gx, gy, gw, gh), border_radius=2)
+        pygame.draw.rect(screen, orm_col,    (gx, gy, gw, gh), 2, border_radius=2)
+        screen.blit(font_sm.render("LIVE  ORM", True, C_TEXT_DIM), (gx + 6, gy + 4))
+        val_surf = font_xl.render(f"{orm_live:5.1f}", True, orm_col)
+        screen.blit(val_surf, (gx + gw - val_surf.get_width() - 8, gy + 22))
+        screen.blit(font_sm.render("rod equiv.", True, C_TEXT_DIM), (gx + 6, gy + gh - 16))
 
-        # SKALA printout value + age
-        skala_age_col = C_RED if age_min > 30 else C_YELLOW if age_min > 10 else C_TEXT_DIM
-        sk_label = font_sm.render(f"SKALA PRINTOUT  (age: {age_min:.0f} min)", True, skala_age_col)
-        sk_val   = font_md.render(f"{orm_skala:.1f} rods", True, C_TEXT)
-        screen.blit(sk_label, (cx + 260, orm_panel_y + 24))
-        screen.blit(sk_val,   (cx + 260, orm_panel_y + 42))
+        # ── SKALA printout box ──
+        sx, sy, sw, sh = cx + 226, orm_panel_y + 22, 210, 62
+        age_border = C_RED if age_min > 30 else C_YELLOW if age_min > 10 else C_BORDER
+        pygame.draw.rect(screen, (6, 8, 14), (sx, sy, sw, sh), border_radius=2)
+        pygame.draw.rect(screen, age_border, (sx, sy, sw, sh), 2, border_radius=2)
+        screen.blit(font_sm.render("SKALA PRINTOUT", True, C_TEXT_DIM), (sx + 6, sy + 4))
+        sk_surf = font_lg.render(f"{orm_skala:5.1f}", True, C_TEXT)
+        screen.blit(sk_surf, (sx + sw - sk_surf.get_width() - 8, sy + 22))
+        age_col = C_RED if age_min > 30 else C_YELLOW if age_min > 10 else C_TEXT_DIM
+        screen.blit(font_sm.render(f"age: {age_min:.0f} min", True, age_col), (sx + 6, sy + sh - 16))
 
-        # Limit lines
-        limit_x = cx + 560
-        screen.blit(font_sm.render("LIMITS:", True, C_TEXT_DIM), (limit_x, orm_panel_y + 6))
-        screen.blit(font_sm.render("< 26 rods  — min normal ops (authorisation required)", True, C_YELLOW), (limit_x, orm_panel_y + 24))
-        screen.blit(font_sm.render("< 15 rods  — ABSOLUTE MINIMUM (shutdown required)", True, C_RED),    (limit_x, orm_panel_y + 42))
-        screen.blit(font_sm.render("  ~8 rods  — Chernobyl Unit 4, 01:22:30 26 Apr 1986",  True, C_TEXT_DIM), (limit_x, orm_panel_y + 60))
+        # ── ORM scale bar ──
+        bx0, by0, bw0, bh0 = cx + 446, orm_panel_y + 22, 460, 62
+        pygame.draw.rect(screen, (6, 8, 14), (bx0, by0, bw0, bh0), border_radius=2)
+        pygame.draw.rect(screen, C_BORDER,   (bx0, by0, bw0, bh0), 1, border_radius=2)
+        screen.blit(font_sm.render("ORM SCALE  (0 – 211 rods)", True, C_TEXT_DIM), (bx0 + 6, by0 + 4))
+        # Scale bar background
+        bar_inner_x, bar_inner_y = bx0 + 8, by0 + 22
+        bar_inner_w, bar_inner_h = bw0 - 16, 18
+        pygame.draw.rect(screen, (20, 25, 35), (bar_inner_x, bar_inner_y, bar_inner_w, bar_inner_h))
+        # Colour zones
+        zone_scale = bar_inner_w / 211.0
+        z8  = int(8  * zone_scale); z15 = int(15 * zone_scale); z26 = int(26 * zone_scale)
+        pygame.draw.rect(screen, (80, 0, 0),   (bar_inner_x,          bar_inner_y, z15,              bar_inner_h))
+        pygame.draw.rect(screen, (80, 60, 0),  (bar_inner_x + z15,    bar_inner_y, z26 - z15,        bar_inner_h))
+        pygame.draw.rect(screen, (0, 60, 20),  (bar_inner_x + z26,    bar_inner_y, bar_inner_w-z26,  bar_inner_h))
+        # Live ORM needle
+        needle_x = bar_inner_x + int(min(orm_live, 211) * zone_scale)
+        pygame.draw.rect(screen, orm_col, (needle_x - 2, bar_inner_y - 2, 4, bar_inner_h + 4))
+        # SKALA needle (dashed/dim)
+        sk_needle_x = bar_inner_x + int(min(orm_skala, 211) * zone_scale)
+        for dy in range(0, bar_inner_h, 4):
+            pygame.draw.line(screen, C_TEXT_DIM, (sk_needle_x, bar_inner_y + dy),
+                             (sk_needle_x, min(bar_inner_y + dy + 2, bar_inner_y + bar_inner_h)))
+        # Limit markers + labels
+        for lim, lbl, col in [(8, "8", (180,50,50)), (15, "15", C_RED), (26, "26", C_YELLOW)]:
+            lx = bar_inner_x + int(lim * zone_scale)
+            pygame.draw.line(screen, col, (lx, bar_inner_y - 3), (lx, bar_inner_y + bar_inner_h + 3), 1)
+            lt = font_sm.render(lbl, True, col)
+            screen.blit(lt, (lx - lt.get_width() // 2, bar_inner_y + bar_inner_h + 5))
+
+        # ── Ref text ──
+        ref_x = cx + 916
+        screen.blit(font_sm.render("LIMITS:", True, C_TEXT_DIM), (ref_x, orm_panel_y + 22))
+        screen.blit(font_sm.render("< 26: min normal ops (authorisation req.)", True, C_YELLOW), (ref_x, orm_panel_y + 38))
+        screen.blit(font_sm.render("< 15: ABSOLUTE MINIMUM — SHUTDOWN", True, C_RED),            (ref_x, orm_panel_y + 54))
+        screen.blit(font_sm.render("  ~8: Chernobyl Unit 4, 01:22 26 Apr 1986", True, C_TEXT_DIM),(ref_x, orm_panel_y + 70))
 
         cy2 += orm_panel_h + 8
 
@@ -768,15 +807,17 @@ def draw_screen_reactivity(screen, snap, fonts, layout, p_data, f_data):
 
     screen.blit(font_md.render("Reactivity Components (qualitative)", True, C_TEXT_HDR), (cx + 10, bar_y))
     bar_y += 28
-    pygame.draw.line(screen, C_TEXT_DIM, (zero_x, bar_y), (zero_x, bar_y + len(components) * 40 + 10))
+    pygame.draw.line(screen, C_TEXT_DIM, (zero_x, bar_y), (zero_x, bar_y + len(components) * 38 + 10))
 
     scale = bar_max_w / 2 / max(0.05, max(abs(v) for _, v, _ in components))
     for name, val, col in components:
+        # Label on its own row above the bar — avoids overlap with bars that extend left
+        screen.blit(font_sm.render(f"{name}:  {val:+.6f}", True, C_TEXT), (cx + 10, bar_y))
+        bar_y += 16
         blen = int(abs(val) * scale)
         bx = zero_x if val >= 0 else zero_x - blen
-        pygame.draw.rect(screen, col, (bx, bar_y + 5, blen, 24), border_radius=3)
-        screen.blit(font_sm.render(f"{name}: {val:+.5f}", True, C_TEXT), (cx + 10, bar_y + 8))
-        bar_y += 40
+        pygame.draw.rect(screen, col, (bx, bar_y, max(2, blen), 14), border_radius=2)
+        bar_y += 22
 
     # Large trends: power + xenon proxy
     trend_y = bar_y + 20
@@ -1003,33 +1044,57 @@ def main():
             txt = font_xl.render("⚠  REACTOR SCRAM  ──  REACTOR SCRAM  ──  REACTOR SCRAM  ⚠", True, (255, 255, 255))
             screen.blit(txt, (W // 2 - txt.get_width() // 2, HEADER_H // 2 - txt.get_height() // 2))
         else:
-            pygame.draw.rect(screen, (12, 16, 26), (0, 0, W, HEADER_H))
-            pygame.draw.line(screen, C_BORDER, (0, HEADER_H - 1), (W, HEADER_H - 1))
-            for i, (rt, base_col) in enumerate([("PWR", (50, 110, 210)), ("BWR", (40, 160, 110)), ("RBMK", (200, 75, 50))]):
+            # DCS header bar
+            pygame.draw.rect(screen, (8, 12, 20), (0, 0, W, HEADER_H))
+            pygame.draw.rect(screen, (30, 50, 90), (0, HEADER_H - 2, W, 2))
+
+            # Reactor selector buttons (left)
+            rt_info = [("PWR",  "PRESSURISED WATER",  (40, 100, 200)),
+                       ("BWR",  "BOILING WATER",       (30, 150, 100)),
+                       ("RBMK", "RBMK-1000",           (190, 65, 40))]
+            for i, (rt, rt_long, base_col) in enumerate(rt_info):
                 active = snapshot.reactor_type == rt
-                bx = 16 + i * 120
-                bg = base_col if active else (25, 32, 46)
-                pygame.draw.rect(screen, bg, (bx, 8, 110, 36), border_radius=6)
-                if active:
-                    bc2 = tuple(min(255, c + 70) for c in base_col)
-                    pygame.draw.rect(screen, bc2, (bx, 8, 110, 36), 2, border_radius=6)
-                t = font_lg.render(rt, True, (255, 255, 255) if active else (80, 100, 130))
-                screen.blit(t, (bx + 55 - t.get_width() // 2, 26 - t.get_height() // 2))
+                bx = 12 + i * 132
+                bg = tuple(int(c * 0.6) for c in base_col) if active else (18, 24, 36)
+                pygame.draw.rect(screen, bg,       (bx, 6, 126, 40), border_radius=3)
+                pygame.draw.rect(screen, base_col if active else (40, 52, 72),
+                                 (bx, 6, 126, 40), 1, border_radius=3)
+                label_t = font_sm.render(rt_long, True, (200, 210, 225) if active else (55, 70, 90))
+                num_t   = font_lg.render(rt,       True, (255, 255, 255) if active else (60, 80, 110))
+                screen.blit(num_t,   (bx + 6, 10))
+                screen.blit(label_t, (bx + 6 + num_t.get_width() + 6, 16))
 
-            speed_str = f"  {effective_speed}×" if effective_speed > 1 else ""
-            t_surf = font_lg.render(f"T = {snapshot.time:8.1f} s{speed_str}", True, C_TEXT)
-            screen.blit(t_surf, (W // 2 - t_surf.get_width() // 2, 14))
+            # Facility ID (center-left)
+            unit_names = {"PWR": "UNIT 1", "BWR": "UNIT 2", "RBMK": "UNIT 4"}
+            fac_names  = {"PWR": "PRESSURISED WATER REACTOR PLANT", "BWR": "BOILING WATER REACTOR PLANT",
+                          "RBMK": "V.I. LENIN NUCLEAR POWER STATION"}
+            unit_t = font_lg.render(unit_names[snapshot.reactor_type], True, (180, 200, 230))
+            fac_t  = font_sm.render(fac_names[snapshot.reactor_type],  True, (90, 110, 140))
+            cx_hdr = W // 2
+            screen.blit(unit_t, (cx_hdr - unit_t.get_width() // 2, 6))
+            screen.blit(fac_t,  (cx_hdr - fac_t.get_width()  // 2, 6 + unit_t.get_height() + 2))
 
+            # Sim time + speed (right of center)
+            speed_str = f"  ×{effective_speed}" if effective_speed > 1 else ""
+            t_surf = font_md.render(f"SIM  T = {snapshot.time:9.1f} s{speed_str}", True, C_TEXT_DIM)
+            screen.blit(t_surf, (cx_hdr + 320, 18))
+
+            # Alarm/trip indicator (right)
             if has_trips:
                 col = (220, 40, 40) if blink_fast else (100, 20, 20)
-                pygame.draw.rect(screen, col, (W - 220, 8, 210, 36), border_radius=6)
-                t = font_lg.render("TRIP ACTIVE", True, (255, 255, 255))
-                screen.blit(t, (W - 220 + 105 - t.get_width() // 2, 26 - t.get_height() // 2))
+                pygame.draw.rect(screen, col, (W - 230, 6, 220, 40), border_radius=3)
+                t = font_lg.render("▶  TRIP ACTIVE", True, (255, 255, 255))
+                screen.blit(t, (W - 230 + 110 - t.get_width() // 2, 26 - t.get_height() // 2))
             elif has_alarms:
                 col = C_ORANGE if blink_slow else (100, 55, 0)
-                pygame.draw.rect(screen, col, (W - 220, 8, 210, 36), border_radius=6)
-                t = font_lg.render("ALARM", True, (255, 255, 255))
-                screen.blit(t, (W - 220 + 105 - t.get_width() // 2, 26 - t.get_height() // 2))
+                pygame.draw.rect(screen, col, (W - 230, 6, 220, 40), border_radius=3)
+                t = font_lg.render("▶  ALARM", True, (255, 255, 255))
+                screen.blit(t, (W - 230 + 110 - t.get_width() // 2, 26 - t.get_height() // 2))
+            else:
+                pygame.draw.rect(screen, (14, 36, 14), (W - 230, 6, 220, 40), border_radius=3)
+                pygame.draw.rect(screen, (30, 80, 30), (W - 230, 6, 220, 40), 1, border_radius=3)
+                t = font_md.render("ALL SYSTEMS NORMAL", True, (50, 200, 80))
+                screen.blit(t, (W - 230 + 110 - t.get_width() // 2, 26 - t.get_height() // 2))
 
         # ── Tab bar ──────────────────────────────────────────────────────────
         draw_tab_bar(screen, active_tab, font, HEADER_H, W)
