@@ -699,19 +699,67 @@ def draw_screen_reactivity(screen, snap, fonts, layout, p_data, f_data):
 
     cy2 = draw_panel(screen, cx, cy, full_w, body_h, "REACTIVITY BUDGET & POISON TRENDS", font_sm)
 
+    # ── RBMK ORM / SKALA panel ───────────────────────────────────────────────
+    if snap.reactor_type == "RBMK":
+        orm_live  = snap.orm
+        orm_skala = snap.skala_orm
+        age_min   = snap.skala_age_s / 60.0
+
+        # Colour coding by severity
+        if orm_live < 15:
+            orm_col = C_RED
+        elif orm_live < 26:
+            orm_col = C_YELLOW
+        else:
+            orm_col = C_GREEN
+
+        orm_panel_y = cy2
+        orm_panel_h = 80
+        pygame.draw.rect(screen, (20, 20, 30), (cx + 8, orm_panel_y, full_w - 16, orm_panel_h), border_radius=4)
+        pygame.draw.rect(screen, C_TEXT_DIM,   (cx + 8, orm_panel_y, full_w - 16, orm_panel_h), 1, border_radius=4)
+
+        screen.blit(font_sm.render("OPERATIONAL REACTIVITY MARGIN  (SKALA/PRIZMA)", True, C_TEXT_HDR),
+                    (cx + 16, orm_panel_y + 6))
+
+        # Real-time ORM (large number)
+        rt_label = font_sm.render("LIVE ORM", True, C_TEXT_DIM)
+        rt_val   = font_lg.render(f"{orm_live:.1f}", True, orm_col)
+        rt_unit  = font_sm.render("rods equiv.", True, C_TEXT_DIM)
+        screen.blit(rt_label, (cx + 16, orm_panel_y + 24))
+        screen.blit(rt_val,   (cx + 16, orm_panel_y + 36))
+        screen.blit(rt_unit,  (cx + 16 + rt_val.get_width() + 6, orm_panel_y + 48))
+
+        # SKALA printout value + age
+        skala_age_col = C_RED if age_min > 30 else C_YELLOW if age_min > 10 else C_TEXT_DIM
+        sk_label = font_sm.render(f"SKALA PRINTOUT  (age: {age_min:.0f} min)", True, skala_age_col)
+        sk_val   = font_md.render(f"{orm_skala:.1f} rods", True, C_TEXT)
+        screen.blit(sk_label, (cx + 260, orm_panel_y + 24))
+        screen.blit(sk_val,   (cx + 260, orm_panel_y + 42))
+
+        # Limit lines
+        limit_x = cx + 560
+        screen.blit(font_sm.render("LIMITS:", True, C_TEXT_DIM), (limit_x, orm_panel_y + 6))
+        screen.blit(font_sm.render("< 26 rods  — min normal ops (authorisation required)", True, C_YELLOW), (limit_x, orm_panel_y + 24))
+        screen.blit(font_sm.render("< 15 rods  — ABSOLUTE MINIMUM (shutdown required)", True, C_RED),    (limit_x, orm_panel_y + 42))
+        screen.blit(font_sm.render("  ~8 rods  — Chernobyl Unit 4, 01:22:30 26 Apr 1986",  True, C_TEXT_DIM), (limit_x, orm_panel_y + 60))
+
+        cy2 += orm_panel_h + 8
+
     # Stacked horizontal bar chart (reactivity components, qualitative)
     rho_total = snap.reactivity
     pf = snap.power_fraction
     pnom = 15.5 if snap.reactor_type == "PWR" else 7.0
 
-    # Approximate components from visible state
-    rod_pos = 0.5  # unknown here, so approximate
     rho_decay = snap.decay_heat_fraction * 0.001
+    # Approximate rod reactivity from rod_position via S-curve
+    rp = snap.rod_position
+    rho_rods_approx = -(3*rp**2 - 2*rp**3) * 0.05  # −rod_worth × w(rod_pos)
 
     components = [
-        ("Total reactivity",  rho_total,  C_ACCENT),
-        ("Xenon (approx)",    -0.02 * (1 - pf),   C_YELLOW),
-        ("Decay heat effect", rho_decay,  C_ORANGE),
+        ("Total reactivity",  rho_total,         C_ACCENT),
+        ("Rods (approx)",     rho_rods_approx,   C_CYAN_PIPE),
+        ("Xenon (approx)",    -0.02 * (1 - pf),  C_YELLOW),
+        ("Decay heat effect", rho_decay,          C_ORANGE),
     ]
 
     bar_y = cy2 + 20
