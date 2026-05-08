@@ -14,6 +14,10 @@ from physics_engine_rbm import RBMKControlInputs, RBMKPlant
 
 ReactorType = Literal["PWR", "BWR", "RBMK"]
 
+# RBMK-1000 has 211 control rods. SKALA recomputed ORM every ~15 simulated minutes.
+_RBMK_TOTAL_RODS = 211
+_SKALA_INTERVAL  = 900.0  # simulated seconds between SKALA ORM printouts
+
 
 @dataclass
 class Alarm:
@@ -145,6 +149,10 @@ class UnifiedSnapshot:
     turbine_valve: float = 1.0
     rod_position: float = 0.5
     flow: float = 1.0
+    # RBMK Operational Reactivity Margin
+    orm: float = 211.0           # real-time calculated ORM (equivalent fully-inserted rods)
+    skala_orm: float = 211.0     # last SKALA printout value (updated every ~15 min sim-time)
+    skala_age_s: float = 0.0     # seconds since last SKALA ORM update
 
 
 class PlantSupervisor:
@@ -161,6 +169,9 @@ class PlantSupervisor:
         self.event_log: Deque[Tuple[float, str, str]] = deque(maxlen=500)
         # 2-of-3 protection channel noise (fractional)
         self._channel_noise: List[float] = [0.0, 0.0, 0.0]
+        # RBMK SKALA: delayed ORM display (real system updated every ~15 sim-min)
+        self._skala_orm: float = float(_RBMK_TOTAL_RODS)
+        self._skala_last_update: float = 0.0
         # Auto controllers
         self.auto_rod      = AutoController(setpoint=550.0, Kp=-0.006, output_min=0.0, output_max=1.0)
         self.auto_pressure = AutoController(setpoint=15.5,  Kp=0.25,  output_min=0.0, output_max=1.0)
@@ -384,6 +395,24 @@ class PlantSupervisor:
         else:
             am.clear_alarm("tt")
 
+        # RBMK Operational Reactivity Margin (ORM) — SKALA/PRIZMA calculation
+        if self.reactor_type == "RBMK":
+            rod_pos = self.controls.rod_position
+            w = 3.0 * rod_pos ** 2 - 2.0 * rod_pos ** 3  # S-curve insertion fraction
+            orm_live = w * _RBMK_TOTAL_RODS
+            # SKALA printout: update every ~15 simulated minutes
+            if t - self._skala_last_update >= _SKALA_INTERVAL:
+                self._skala_orm = orm_live
+                self._skala_last_update = t
+            # ORM alarms (based on real-time value; SKALA delay is a display issue)
+            warn("orm_low",  "ORM below minimum — authorisation required", orm_live < 26)
+            if orm_live < 15:
+                am.raise_alarm("orm_crit", 1, "ORM CRITICAL (<15): SHUTDOWN REQUIRED", t, is_trip=True)
+                self.controls.scram = True
+                self.event_log.append((t, "AUTO_SCRAM", f"ORM critical: {orm_live:.1f} rods"))
+            else:
+                am.clear_alarm("orm_crit")
+
         active = self.alarm_mgr.active_alarms()
         self.bop.alarms = [a.message for a in active if not a.is_trip]
         self.bop.trips  = [a.message for a in active if a.is_trip]
@@ -503,4 +532,8 @@ class PlantSupervisor:
             turbine_valve=c.turbine_valve,
             rod_position=c.rod_position,
             flow=c.flow,
+            orm=( (lambda p: (3*p**2 - 2*p**3) * _RBMK_TOTAL_RODS)(c.rod_position)
+                  if self.reactor_type == "RBMK" else 0.0 ),
+            skala_orm=self._skala_orm if self.reactor_type == "RBMK" else 0.0,
+            skala_age_s=self._sim_time - self._skala_last_update,
         )
