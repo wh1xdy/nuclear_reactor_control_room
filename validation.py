@@ -16,8 +16,10 @@ def run_scram_transient(reactor: str):
     c = sup.controls
     c.startup_permit = True
     if reactor == "RBMK":
-        c.rod_position = 0.98
-        c.flow = 1.1
+        # Moderate insertion + lower flow so void fraction builds enough to
+        # demonstrate the positive void coefficient.
+        c.rod_position = 0.55
+        c.flow = 0.7
         c.turbine_valve = 0.7
         c.feedwater_valve = 0.7
     elif reactor == "BWR":
@@ -33,7 +35,8 @@ def run_scram_transient(reactor: str):
 
     peak_power = 0.0
     peak_void = 0.0
-    pre_steps = 80 if reactor == "BWR" else 300
+    # RBMK has large graphite thermal mass — give it extra time to stabilise.
+    pre_steps = 80 if reactor == "BWR" else (500 if reactor == "RBMK" else 300)
     for _ in range(pre_steps):
         s = sup.step(0.1)
         peak_power = max(peak_power, s.power_fraction)
@@ -42,6 +45,18 @@ def run_scram_transient(reactor: str):
     c.scram = True
     post_scram = []
     for _ in range(200):
+        s = sup.step(0.1)
+        post_scram.append(s.power_fraction)
+
+    return {
+        "peak": peak_power,
+        "scram_tail": post_scram[-1],
+        "scram_avg_last20": sum(post_scram[-20:]) / 20.0,
+        "void": s.void_fraction,
+        "peak_void": peak_void,
+    }
+
+
 def run_transient(reactor: str):
     sup = PlantSupervisor(reactor)  # type: ignore[arg-type]
     c = sup.controls
@@ -67,7 +82,6 @@ def run_transient(reactor: str):
         "scram_tail": post_scram[-1],
         "scram_avg_last20": sum(post_scram[-20:]) / 20.0,
         "void": s.void_fraction,
-        "peak_void": peak_void,
     }
 
 

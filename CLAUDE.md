@@ -86,7 +86,7 @@ A single-file Pygame application running at 1920×1080, 60 Hz. It instantiates o
 | `F` / `V` | Feedwater valve open / close |
 | `H` / `N` | Pressurizer heater up / down |
 | `B` / `G` | Boration rate up / down (PWR) |
-| `U` / `I key` | Dilution rate up / down (PWR) |
+| `U` / `J` | Dilution rate up / down (PWR) |
 | `SHIFT` | Fast adjustment (5× step) |
 | `SPACE` | SCRAM (emergency shutdown) |
 | `L` | Reset SCRAM (requires rods in, all trips clear) |
