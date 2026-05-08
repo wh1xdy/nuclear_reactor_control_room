@@ -91,7 +91,7 @@ class RBMKParams:
         1.14,
         3.01,
     ])
-    Lambda_prompt: float = 1.5e-4
+    Lambda_prompt: float = 6.0e-5  # RBMK graphite-moderated: ~60 µs
     nominal_power: float = 3.2e9  # RBMKs are large (~1 GW electric)
     fuel_heat_capacity: float = 7.0e7
     graphite_heat_capacity: float = 1.5e8  # graphite moderator large mass
@@ -110,10 +110,10 @@ class RBMKParams:
     rod_drop_tau: float = 18.0
     fuel_temp_coeff: float = -1.0e-5  # negative doppler
     graphite_temp_coeff: float = -5.0e-6  # graphite also gives negative feedback
-    void_coeff: float = +0.08  # positive void coefficient (≈ +8 pcm per % void)
+    void_coeff: float = +0.003  # RBMK positive void coefficient: ~+3 pcm per % void = +0.003 per unit fraction
     gamma_xe: float = 0.065
-    lambda_I: float = 1.0 / (6.6 * 3600)
-    lambda_Xe: float = 1.0 / (9.2 * 3600)
+    lambda_I: float = 0.6931 / (6.57 * 3600)   # I-135: λ = ln2/t½
+    lambda_Xe: float = 0.6931 / (9.17 * 3600)  # Xe-135: λ = ln2/t½
     xenon_burn_coeff: float = 0.08
     xenon_reactivity_coeff: float = 0.02
     nominal_fuel_temp: float = 600.0
