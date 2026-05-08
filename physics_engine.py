@@ -164,7 +164,7 @@ class PlantParams:
     # stiff systems like point kinetics at the cost of CPU
     # time.  The default of 10 ms works well for time steps
     # on the order of 50 ms–100 ms.
-    internal_dt: float = 0.001  # reduced to match BWR/RBMK for RK2 stability
+    internal_dt: float = 0.01   # thermal/xenon substep; kinetics uses its own adaptive splitting
     # External reactivity bias injected each step (used for boron, instructor overrides, etc.)
     external_reactivity: float = 0.0
 
@@ -232,14 +232,18 @@ class PointKinetics:
 
     def __init__(self, params: PlantParams) -> None:
         self.params = params
-        # Initialise neutron population at nominal.
         self.n: float = 1.0
-        # Initialise precursor concentrations to equilibrium values for
-        # n=1.  For each group i, C_i = β_i / (λ_i * Λ).
         self.C: List[float] = [
             params.beta[i] / (params.lambda_d[i] * params.Lambda_prompt)
             for i in range(len(params.beta))
         ]
+        # Pre-allocated working arrays for RK2 — avoids per-substep list creation
+        _n = len(params.beta)
+        self._C0:         List[float] = [0.0] * _n
+        self._Cmid:       List[float] = [0.0] * _n
+        self._dC1:        List[float] = [0.0] * _n
+        self._dC2:        List[float] = [0.0] * _n
+        self._beta_total: float       = sum(params.beta)
 
     def _dn_dt(self, rho: float, n: float, C: List[float]) -> float:
         p = self.params
@@ -253,31 +257,57 @@ class PointKinetics:
     def step(self, dt: float, rho: float) -> None:
         """Advance the kinetics state by dt seconds using RK2 (midpoint).
 
-        For numerical stability when n is small (near shutdown), we
-        sub-divide the step further so that n_mid cannot go deeply negative.
+        Uses pre-allocated working arrays to avoid per-substep list creation.
         """
-        beta_total = sum(self.params.beta)
-        # Stability criterion: dt_safe << n / |dn/dt|
-        # Use conservative fraction to avoid midpoint inversion
-        prompt_rate = abs(rho - beta_total) / self.params.Lambda_prompt
-        precursor_src = sum(l * c for l, c in zip(self.params.lambda_d, self.C))
-        dn_mag = prompt_rate * max(self.n, 1e-6) + abs(precursor_src)
-        n_for_stability = max(self.n, 1e-6)
-        dt_safe = 0.3 * n_for_stability / max(dn_mag, 1e-10)
-        n_sub = max(1, int(dt / min(dt, dt_safe)))
-        sub_dt = dt / n_sub
+        p = self.params
+        lam = p.lambda_d
+        bet = p.beta
+        Lam = p.Lambda_prompt
+        beta_total = self._beta_total
+        C = self.C
+        C0, Cmid, dC1, dC2 = self._C0, self._Cmid, self._dC1, self._dC2
+
+        # Adaptive sub-step: dt_safe = 0.3 * n / |dn/dt|
+        # Unrolled 6-group sums to avoid generator+sum overhead (hot path at 600×)
+        _ps = lam[0]*C[0]+lam[1]*C[1]+lam[2]*C[2]+lam[3]*C[3]+lam[4]*C[4]+lam[5]*C[5]
+        _pr = (rho - beta_total if rho > beta_total else beta_total - rho) / Lam
+        _n0 = self.n if self.n > 1e-6 else 1e-6
+        _dm = _pr * _n0 + (_ps if _ps > 0 else -_ps)
+        # Skip adaptive splitting in deep shutdown: decay heat dominates, kinetics irrelevant
+        if self.n < 1e-4:
+            n_sub = 1
+        else:
+            dt_safe = 0.3 * _n0 / (_dm if _dm > 1e-10 else 1e-10)
+            n_sub   = min(200, max(1, int(dt / (dt if dt < dt_safe else dt_safe))))
+        sub_dt  = dt / n_sub
+
+        # Hoist all loop-invariants out of the hot loop
+        _rbl = (rho - beta_total) / Lam
+        hdt  = 0.5 * sub_dt
+        iLam = 1.0 / Lam
+        # Precompute beta/Lambda for each group
+        bL0=bet[0]*iLam; bL1=bet[1]*iLam; bL2=bet[2]*iLam
+        bL3=bet[3]*iLam; bL4=bet[4]*iLam; bL5=bet[5]*iLam
+        l0=lam[0]; l1=lam[1]; l2=lam[2]; l3=lam[3]; l4=lam[4]; l5=lam[5]
+
         for _ in range(n_sub):
             n0 = self.n
-            C0 = self.C[:]
-            dn1 = self._dn_dt(rho, n0, C0)
-            dC1 = self._dC_dt(n0, C0)
-            n_mid = n0 + 0.5 * sub_dt * dn1
-            C_mid = [C0[i] + 0.5 * sub_dt * dC1[i] for i in range(len(C0))]
-            dn2 = self._dn_dt(rho, n_mid, C_mid)
-            dC2 = self._dC_dt(n_mid, C_mid)
+            C0[0]=C[0]; C0[1]=C[1]; C0[2]=C[2]; C0[3]=C[3]; C0[4]=C[4]; C0[5]=C[5]
+            # Stage 1
+            dn1 = _rbl*n0 + l0*C0[0]+l1*C0[1]+l2*C0[2]+l3*C0[3]+l4*C0[4]+l5*C0[5]
+            dC1[0]=bL0*n0-l0*C0[0]; dC1[1]=bL1*n0-l1*C0[1]; dC1[2]=bL2*n0-l2*C0[2]
+            dC1[3]=bL3*n0-l3*C0[3]; dC1[4]=bL4*n0-l4*C0[4]; dC1[5]=bL5*n0-l5*C0[5]
+            n_mid = n0 + hdt * dn1
+            Cmid[0]=C0[0]+hdt*dC1[0]; Cmid[1]=C0[1]+hdt*dC1[1]; Cmid[2]=C0[2]+hdt*dC1[2]
+            Cmid[3]=C0[3]+hdt*dC1[3]; Cmid[4]=C0[4]+hdt*dC1[4]; Cmid[5]=C0[5]+hdt*dC1[5]
+            # Stage 2
+            dn2 = _rbl*n_mid + l0*Cmid[0]+l1*Cmid[1]+l2*Cmid[2]+l3*Cmid[3]+l4*Cmid[4]+l5*Cmid[5]
+            dC2[0]=bL0*n_mid-l0*Cmid[0]; dC2[1]=bL1*n_mid-l1*Cmid[1]; dC2[2]=bL2*n_mid-l2*Cmid[2]
+            dC2[3]=bL3*n_mid-l3*Cmid[3]; dC2[4]=bL4*n_mid-l4*Cmid[4]; dC2[5]=bL5*n_mid-l5*Cmid[5]
             self.n += sub_dt * dn2
-            for i in range(len(self.C)):
-                self.C[i] += sub_dt * dC2[i]
+            C[0]+=sub_dt*dC2[0]; C[1]+=sub_dt*dC2[1]; C[2]+=sub_dt*dC2[2]
+            C[3]+=sub_dt*dC2[3]; C[4]+=sub_dt*dC2[4]; C[5]+=sub_dt*dC2[5]
+
         if self.n < 0.0:
             self.n = 0.0
 

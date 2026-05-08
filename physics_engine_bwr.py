@@ -180,7 +180,7 @@ class BWRParams:
     nominal_fuel_temp: float = 600.0
     nominal_void_fraction: float = 0.4
     nominal_steam_temp: float = 540.0
-    internal_dt: float = 0.001
+    internal_dt: float = 0.01   # thermal/xenon substep; kinetics RK2 is sub-stepped adaptively
 
 
 @dataclass
@@ -249,10 +249,14 @@ class PointKinetics:
 
     def __init__(self, params: BWRParams):
         self.p = params
-        # Power fraction (neutron population relative to nominal)
         self.n = 1.0
-        # Precursor concentrations for the six delayed neutron groups
         self.c = [b / (self.p.Lambda_prompt * ld) for b, ld in zip(self.p.beta, self.p.lambda_d)]
+        # Pre-allocated working arrays for RK2
+        self._c0:         List[float] = [0.0] * 6
+        self._cmid:       List[float] = [0.0] * 6
+        self._dc1:        List[float] = [0.0] * 6
+        self._dc2:        List[float] = [0.0] * 6
+        self._beta_total: float       = sum(self.p.beta)
 
     def reactivity_rhs(self, reactivity: float, n: float, c: List[float]) -> float:
         """Right‑hand side of the neutron balance equation.
@@ -299,40 +303,58 @@ class PointKinetics:
         return dc_dt
 
     def step(self, dt: float, reactivity: float) -> None:
-        """Advance the point kinetics state by dt seconds.
+        """Advance the point kinetics state by dt seconds using RK2 (midpoint).
 
-        Parameters
-        ----------
-        dt : float
-            Time increment [s].  Should be small relative to
-            the prompt period for stability.
-        reactivity : float
-            Reactivity input [Δk/k].
+        Adaptive sub-stepping (same as PWR) prevents instability at large dt.
+        Uses pre-allocated working arrays to avoid per-substep list creation.
         """
-        # Use a second‑order Runge–Kutta (midpoint) integrator for
-        # improved stability over explicit Euler.  For stiff
-        # systems and very small dt this is sufficient.
-        n0 = self.n
-        c0 = self.c[:]
-        # Stage 1
-        dn1 = self.reactivity_rhs(reactivity, n0, c0)
-        dc1 = self.precursor_rhs(n0, c0)
-        n_mid = n0 + 0.5 * dt * dn1
-        c_mid = [ci + 0.5 * dt * dci for ci, dci in zip(c0, dc1)]
-        # Stage 2
-        dn2 = self.reactivity_rhs(reactivity, n_mid, c_mid)
-        dc2 = self.precursor_rhs(n_mid, c_mid)
-        # Update state
-        self.n += dt * dn2
-        for i in range(6):
-            self.c[i] += dt * dc2[i]
-        if not math.isfinite(self.n):
+        p   = self.p
+        lam = p.lambda_d
+        bet = p.beta
+        Lam = p.Lambda_prompt
+        beta_total = self._beta_total
+        c = self.c
+        c0, cmid, dc1, dc2 = self._c0, self._cmid, self._dc1, self._dc2
+
+        # Adaptive sub-step + unrolled 6-group sums (hot path at 600×)
+        _ps = lam[0]*c[0]+lam[1]*c[1]+lam[2]*c[2]+lam[3]*c[3]+lam[4]*c[4]+lam[5]*c[5]
+        _pr = (reactivity - beta_total if reactivity > beta_total else beta_total - reactivity) / Lam
+        _n0 = self.n if self.n > 1e-6 else 1e-6
+        _dm = _pr * _n0 + (_ps if _ps > 0 else -_ps)
+        # Skip adaptive splitting in deep shutdown: decay heat dominates, kinetics irrelevant
+        if self.n < 1e-4:
+            n_sub = 1
+        else:
+            dt_safe = 0.3 * _n0 / (_dm if _dm > 1e-10 else 1e-10)
+            n_sub   = min(200, max(1, int(dt / (dt if dt < dt_safe else dt_safe))))
+        sub_dt  = dt / n_sub
+        _rbl = (reactivity - beta_total) / Lam
+        hdt  = 0.5 * sub_dt
+        iLam = 1.0 / Lam
+        bL0=bet[0]*iLam; bL1=bet[1]*iLam; bL2=bet[2]*iLam
+        bL3=bet[3]*iLam; bL4=bet[4]*iLam; bL5=bet[5]*iLam
+        l0=lam[0]; l1=lam[1]; l2=lam[2]; l3=lam[3]; l4=lam[4]; l5=lam[5]
+
+        for _ in range(n_sub):
+            n0 = self.n
+            c0[0]=c[0]; c0[1]=c[1]; c0[2]=c[2]; c0[3]=c[3]; c0[4]=c[4]; c0[5]=c[5]
+            dn1 = _rbl*n0 + l0*c0[0]+l1*c0[1]+l2*c0[2]+l3*c0[3]+l4*c0[4]+l5*c0[5]
+            dc1[0]=bL0*n0-l0*c0[0]; dc1[1]=bL1*n0-l1*c0[1]; dc1[2]=bL2*n0-l2*c0[2]
+            dc1[3]=bL3*n0-l3*c0[3]; dc1[4]=bL4*n0-l4*c0[4]; dc1[5]=bL5*n0-l5*c0[5]
+            n_mid = n0 + hdt * dn1
+            cmid[0]=c0[0]+hdt*dc1[0]; cmid[1]=c0[1]+hdt*dc1[1]; cmid[2]=c0[2]+hdt*dc1[2]
+            cmid[3]=c0[3]+hdt*dc1[3]; cmid[4]=c0[4]+hdt*dc1[4]; cmid[5]=c0[5]+hdt*dc1[5]
+            dn2 = _rbl*n_mid + l0*cmid[0]+l1*cmid[1]+l2*cmid[2]+l3*cmid[3]+l4*cmid[4]+l5*cmid[5]
+            dc2[0]=bL0*n_mid-l0*cmid[0]; dc2[1]=bL1*n_mid-l1*cmid[1]; dc2[2]=bL2*n_mid-l2*cmid[2]
+            dc2[3]=bL3*n_mid-l3*cmid[3]; dc2[4]=bL4*n_mid-l4*cmid[4]; dc2[5]=bL5*n_mid-l5*cmid[5]
+            self.n += sub_dt * dn2
+            c[0]+=sub_dt*dc2[0]; c[1]+=sub_dt*dc2[1]; c[2]+=sub_dt*dc2[2]
+            c[3]+=sub_dt*dc2[3]; c[4]+=sub_dt*dc2[4]; c[5]+=sub_dt*dc2[5]
+
+        if not math.isfinite(self.n) or self.n < 0.0:
             self.n = 0.0
-        if self.n < 0.0:
-            self.n = 0.0
-        if self.n > 20.0:
-            self.n = 20.0
-        self.n = max(0.0, min(5.0, self.n))
+        elif self.n > 5.0:
+            self.n = 5.0
 
 
 class XenonIodine:
