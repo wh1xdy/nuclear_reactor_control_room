@@ -893,7 +893,7 @@ def main():
         if keys[pygame.K_b]: bor.set(bor.v + step)
         if keys[pygame.K_g]: bor.set(bor.v - step)
         if keys[pygame.K_u]: dil.set(dil.v + step)
-        if keys[pygame.K_i]: dil.set(dil.v - step)
+        if keys[pygame.K_j]: dil.set(dil.v - step)
 
         controls.rod_position       = rod.v
         controls.flow               = flow.v
