@@ -308,6 +308,8 @@ class PointKinetics:
         Adaptive sub-stepping (same as PWR) prevents instability at large dt.
         Uses pre-allocated working arrays to avoid per-substep list creation.
         """
+        if dt <= 0.0:
+            return
         p   = self.p
         lam = p.lambda_d
         bet = p.beta
