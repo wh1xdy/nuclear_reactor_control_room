@@ -522,7 +522,7 @@ def draw_screen_primary(screen, snap, supervisor, fonts, layout, blink_fast):
     box_defs = [
         ("Core power", f"{snap.power_fraction*100:.2f} %",  C_GREEN if snap.power_fraction < 1.1 else C_RED),
         ("Pressure",   f"{snap.pressure_mpa:.3f} MPa",      C_GREEN if snap.pressure_mpa < pnom*1.04 else C_YELLOW),
-        ("Fuel temp",  f"{snap.fuel_temp_k:.1f} K",         C_GREEN if snap.fuel_temp_k < 900 else C_ORANGE),
+        ("Fuel temp",  f"{snap.fuel_temp_k:.1f} K",         C_GREEN if snap.fuel_temp_k < 1100 else C_ORANGE),
         ("Coolant T",  f"{snap.coolant_temp_k:.1f} K",      C_GREEN if snap.coolant_temp_k < 580 else C_YELLOW),
         ("RCP speed",  f"{supervisor.bop.omega_rcp*100:.1f} %",
          C_GREEN if supervisor.bop.omega_rcp > 0.90 else C_ORANGE),

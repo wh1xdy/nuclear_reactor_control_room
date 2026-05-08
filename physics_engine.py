@@ -154,7 +154,7 @@ class PlantParams:
     # Nominal temperatures [K].  These reference values define
     # zero reactivity feedback when the plant operates at design
     # conditions.
-    nominal_fuel_temp: float = 600.0
+    nominal_fuel_temp: float = 900.0  # PWR average fuel temp at full power ~900 K
     nominal_coolant_temp: float = 550.0
     nominal_sg_temp: float = 550.0
     # Internal integration time step [s].  Each call to
