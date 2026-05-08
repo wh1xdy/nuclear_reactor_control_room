@@ -833,7 +833,13 @@ def draw_screen_reactivity(screen, snap, fonts, layout, p_data, f_data):
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((W, H))
+    info = pygame.display.Info()
+    # Leave room for OS window chrome; never exceed the logical 1920×1080 canvas
+    win_w = min(W, info.current_w  - 20)
+    win_h = min(H, info.current_h  - 60)
+    # SCALED: pygame renders at W×H internally and scales to the window — no
+    # coordinate changes needed anywhere else in the code.
+    screen = pygame.display.set_mode((win_w, win_h), pygame.SCALED)
     pygame.display.set_caption("Nuclear Reactor Control Room")
 
     font_sm = pygame.font.SysFont("Menlo", 13)
