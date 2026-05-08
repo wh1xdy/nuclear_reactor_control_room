@@ -142,6 +142,9 @@ class UnifiedSnapshot:
     eccs_actuated: bool = False
     loca_area: float = 0.0
     channel_noise: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    turbine_valve: float = 1.0
+    rod_position: float = 0.5
+    flow: float = 1.0
 
 
 class PlantSupervisor:
@@ -497,4 +500,7 @@ class PlantSupervisor:
             eccs_actuated=self.bop.eccs_actuated,
             loca_area=c.fault_loca_break_area,
             channel_noise=list(self._channel_noise),
+            turbine_valve=c.turbine_valve,
+            rod_position=c.rod_position,
+            flow=c.flow,
         )

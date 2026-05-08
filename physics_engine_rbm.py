@@ -179,6 +179,8 @@ class RBMKKinetics:
 
     def step(self, dt: float, rho: float) -> None:
         """RK2 midpoint with adaptive sub-stepping and pre-allocated working arrays."""
+        if dt <= 0.0:
+            return
         p   = self.p
         lam = p.lambda_d
         bet = p.beta
