@@ -149,8 +149,12 @@ class PlantParams:
     gamma_xe: float = 0.065  # fraction of fissions producing I‑135
     lambda_I: float = 0.6931 / (6.57 * 3600)   # I-135: λ = ln2/t½, t½ = 6.57 h
     lambda_Xe: float = 0.6931 / (9.17 * 3600)  # Xe-135: λ = ln2/t½, t½ = 9.17 h
-    xenon_burn_coeff: float = 0.08  # effective burn rate per unit power
-    xenon_reactivity_coeff: float = 0.02  # Δk/k per unit xenon inventory
+    # Xe-135 neutron absorption burn rate at full thermal-LWR flux ≈ σ_a(Xe)·φ ≈ 2.1e-5 s⁻¹
+    # (≈ λ_Xe). Fixes post-shutdown xenon peak dynamics (previously 0.08 was ~3800× too large).
+    xenon_burn_coeff: float = 2.1e-5
+    # Scaled to give equilibrium Xe reactivity ≈ −2500 pcm at full power.
+    # X_eq = γ/(λ_Xe + σφ) ≈ 0.065/4.2e-5 ≈ 1548; coeff = 0.025/1548 ≈ 1.6e-5
+    xenon_reactivity_coeff: float = 1.6e-5
     # Nominal temperatures [K].  These reference values define
     # zero reactivity feedback when the plant operates at design
     # conditions.
