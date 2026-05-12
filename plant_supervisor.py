@@ -99,7 +99,7 @@ class SupervisorControls:
     pressurizer_heater: float = 0.5
     boration_rate: float = 0.0
     dilution_rate: float = 0.0
-    startup_permit: bool = False
+    startup_permit: bool = True
     turbine_trip: bool = False
     scram: bool = False
     fault_pump_degraded: bool = False
@@ -279,7 +279,7 @@ class PlantSupervisor:
         # PWR boron concentration (first-order mixing)
         if self.reactor_type == "PWR":
             V_primary = 300.0  # m³ (nominal PWR primary inventory)
-            d_boron = (c.boration_rate * 2000.0 - c.dilution_rate * self._boron_ppm) / V_primary
+            d_boron = (c.boration_rate * 150.0 - c.dilution_rate * self._boron_ppm) / V_primary
             self._boron_ppm = max(0.0, min(4000.0, self._boron_ppm + d_boron * dt))
 
         steam_gen = thermal_power_w / 3.0e9

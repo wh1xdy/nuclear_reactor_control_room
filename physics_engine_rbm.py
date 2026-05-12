@@ -75,13 +75,15 @@ class RBMKParams:
     accompanying documentation for further discussion.
     """
 
+    # RBMK β_eff ≈ 0.005 (Pu-bearing irradiated core, lower than fresh U-235 ~0.0065).
+    # Scaled from U-235 Keepin groups by factor 0.77 to give β_total ≈ 0.0050.
     beta: List[float] = field(default_factory=lambda: [
-        2.15e-4,
-        1.424e-3,
-        1.274e-3,
-        2.568e-3,
-        7.48e-4,
-        2.73e-4,
+        1.66e-4,
+        1.097e-3,
+        0.981e-3,
+        1.978e-3,
+        5.76e-4,
+        2.10e-4,
     ])
     lambda_d: List[float] = field(default_factory=lambda: [
         0.0124,
@@ -110,12 +112,12 @@ class RBMKParams:
     rod_drop_tau: float = 18.0
     fuel_temp_coeff: float = -1.0e-5  # negative doppler
     graphite_temp_coeff: float = -5.0e-6  # graphite also gives negative feedback
-    void_coeff: float = +0.003  # RBMK positive void coefficient: ~+3 pcm per % void = +0.003 per unit fraction
+    void_coeff: float = +0.005  # RBMK positive void: +5 pcm/% void (end-of-cycle, low-ORM, Chernobyl-like)
     gamma_xe: float = 0.065
     lambda_I: float = 0.6931 / (6.57 * 3600)   # I-135: λ = ln2/t½
     lambda_Xe: float = 0.6931 / (9.17 * 3600)  # Xe-135: λ = ln2/t½
-    xenon_burn_coeff: float = 0.08
-    xenon_reactivity_coeff: float = 0.02
+    xenon_burn_coeff: float = 2.1e-5   # σ_a(Xe)·φ at full flux ≈ 2.1e-5 s⁻¹ (was 0.08 — 3800× too large)
+    xenon_reactivity_coeff: float = 1.6e-5  # X_eq ≈ 1548; 0.025/1548
     nominal_fuel_temp: float = 800.0  # RBMK average fuel temp at full power ~800 K
     nominal_graphite_temp: float = 700.0
     nominal_void_fraction: float = 0.1
@@ -235,8 +237,9 @@ class XenonIodineRBMK:
 
     def __init__(self, params: RBMKParams):
         self.p = params
-        self.I = 0.0
-        self.Xe = 0.0
+        # Start at full-power equilibrium
+        self.I: float  = params.gamma_xe / params.lambda_I
+        self.Xe: float = params.gamma_xe / (params.lambda_Xe + params.xenon_burn_coeff)
 
     def step(self, dt: float, power_fraction: float) -> float:
         dI_dt = self.p.gamma_xe * power_fraction - self.p.lambda_I * self.I
@@ -325,9 +328,10 @@ class RBMKPlant:
         if self.scrammed:
             rho_rods += self.p.scram_extra_worth
         # RBMK graphite displacer tip positive reactivity spike:
-        # when rods begin inserting (scrammed, tip-first entry 0–20%),
-        # graphite displaces water before absorber portion enters core.
-        if self.scrammed and rod_pos < 0.2:
+        # Applies on ANY rod insertion from a withdrawn position (not just SCRAM).
+        # When rods enter tip-first, graphite displaces water (+reactivity) before
+        # the absorber section reaches the active zone. Real Chernobyl effect.
+        if rod_pos < 0.2:
             rho_rods += 0.014 * (0.2 - rod_pos) / 0.2
         rho_fuel = self.p.fuel_temp_coeff * (self.thermal.T_fuel - self.p.nominal_fuel_temp)
         rho_graphite = self.p.graphite_temp_coeff * (self.thermal.T_graphite - self.p.nominal_graphite_temp)
