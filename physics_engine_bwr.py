@@ -171,12 +171,12 @@ class BWRParams:
     # Time for hydraulic control blades to fully insert on SCRAM [s].
     rod_drop_tau: float = 2.5
     fuel_temp_coeff: float = -1.5e-5
-    void_coeff: float = -0.15  # BWR void reactivity: ~−100 to −200 pcm/% void = −0.10 to −0.20 per unit fraction
+    void_coeff: float = -0.015  # BWR void reactivity: −10 to −20 pcm/% void → −0.01 to −0.02 per unit fraction
     gamma_xe: float = 0.065
     lambda_I: float = 0.6931 / (6.57 * 3600)   # I-135: λ = ln2/t½
     lambda_Xe: float = 0.6931 / (9.17 * 3600)  # Xe-135: λ = ln2/t½
-    xenon_burn_coeff: float = 0.08
-    xenon_reactivity_coeff: float = 0.02
+    xenon_burn_coeff: float = 2.1e-5   # σ_a(Xe)·φ at full BWR flux ≈ 2.1e-5 s⁻¹
+    xenon_reactivity_coeff: float = 1.6e-5  # X_eq ≈ 1548 at full power; 0.025/1548
     nominal_fuel_temp: float = 800.0  # BWR average fuel temp at full power ~800 K
     nominal_void_fraction: float = 0.4
     nominal_steam_temp: float = 540.0
@@ -373,8 +373,9 @@ class XenonIodine:
 
     def __init__(self, params: BWRParams):
         self.p = params
-        self.I = 0.0
-        self.Xe = 0.0
+        # Start at full-power equilibrium (same formula as PWR XenonModel)
+        self.I: float  = params.gamma_xe / params.lambda_I
+        self.Xe: float = params.gamma_xe / (params.lambda_Xe + params.xenon_burn_coeff)
 
     def step(self, dt: float, power_fraction: float) -> float:
         """Advance the iodine/xenon inventory by dt seconds.

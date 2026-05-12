@@ -30,14 +30,18 @@ All performance decisions should be made with this machine as the baseline:
 ```bash
 # Install dependencies (in a venv)
 python -m venv .venv && source .venv/bin/activate
-pip install -e .                  # installs pygame, numpy (and registers the `nrcr` entry point)
+pip install pygame-ce numpy       # pygame-ce has pre-built arm64 wheels; plain 'pygame' must be compiled from source on M5
+pip install -e .                  # registers the `nrcr` entry point
 pip install iapws                 # optional: more accurate steam/water properties
 
 # Run
+source .venv/bin/activate
 nrcr
 # or
 python run_control_room.py
 ```
+
+> **Note:** Use `pygame-ce` (Community Edition), not `pygame`. The standard `pygame` package links against an x86-only Homebrew SDL2 at `/usr/local/lib` and fails to build on arm64. `pygame-ce` ships a pre-built arm64 wheel and is a drop-in API replacement.
 
 ## Building a macOS DMG (local)
 
@@ -73,7 +77,14 @@ All three engines share the same underlying dynamics:
 
 ### UI layer (`run_control_room.py`)
 
-A single-file Pygame application running at 1920×1080, 60 Hz. It instantiates one of the three `*Plant` objects via `PlantSupervisor` and calls `supervisor.step(dt)` once per frame. Reactor switching (`1/2/3`) replaces the plant object and resets sliders. The six F-key tabs (F1–F6) render different views of the same snapshot; only the active tab is drawn each frame.
+A single-file Pygame-CE application targeting a 1920×1080 logical design grid, running at 60 Hz. It instantiates one of the three `*Plant` objects via `PlantSupervisor` and calls `supervisor.step(dt)` once per frame. Reactor switching (`1/2/3`) replaces the plant object and resets sliders. The six F-key tabs (F1–F6) render different views of the same snapshot; only the active tab is drawn each frame.
+
+**Display / DPI handling:**
+- Launched with `pygame.ALLOW_HIGHDPI | pygame.RESIZABLE`.
+- On Retina (M5 Pro), `screen.get_size()` returns the native pixel resolution (≈2× logical). The global `SCALE = actual_W / 1920.0` is computed on startup and recomputed whenever the window is resized via `VIDEORESIZE` event.
+- All drawing helpers and layout constants pass pixel values through `_s(n) = max(1, int(n * SCALE))`, so the UI stays sharp and correctly proportioned at any size or DPI.
+- Minimum window size clamp: 960×540 (enforced in `VIDEORESIZE` handler).
+- Opening size: full screen minus OS chrome margins (min 1280×720).
 
 ## Keyboard controls (runtime)
 
