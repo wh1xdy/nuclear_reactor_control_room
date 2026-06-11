@@ -1,4 +1,4 @@
-// TabBar.swift — Six-tab bar with electric-blue active underline.
+// TabBar.swift — Liquid Glass tab bar with morphing-merge behaviour.
 
 import SwiftUI
 
@@ -15,15 +15,19 @@ struct TabBar: View {
     @Binding var activeTab: Int
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(tabs.enumerated()), id: \.offset) { i, tab in
-                TabButton(fkey: tab.0, name: tab.1, active: activeTab == i) {
-                    activeTab = i
+        // Tabs inside a GlassEffectContainer so they merge when adjacent —
+        // pure glass, no background strip, no separator rule.
+        GlassEffectContainer(spacing: 2) {
+            HStack(spacing: 4) {
+                ForEach(Array(tabs.enumerated()), id: \.offset) { i, tab in
+                    TabButton(fkey: tab.0, name: tab.1, active: activeTab == i) {
+                        withAnimation(.spring(duration: 0.3)) { activeTab = i }
+                    }
                 }
             }
+            .padding(.horizontal, 12)
         }
-        .background(Color(r: 12, g: 14, b: 17))
-        .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
+        .frame(height: Theme.tabHeight)
     }
 }
 
@@ -35,29 +39,23 @@ private struct TabButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Text(fkey)
-                    .font(Theme.readout)
+                    .font(Theme.readoutSm)
                     .foregroundStyle(active ? Theme.accent : Theme.textDim)
                 Text(name)
-                    .font(Theme.readout)
-                    .foregroundStyle(active ? Theme.text : Theme.textDim)
+                    .font(Theme.readoutSm)
+                    .foregroundStyle(active ? .white : Theme.textDim)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity)
-            .frame(height: Theme.tabHeight)
-            .background(active ? Color(r: 22, g: 28, b: 36) : Color.clear)
-            .overlay(alignment: .bottom) {
-                if active {
-                    Theme.accent.frame(height: 3)
-                }
-            }
-            .overlay {
-                if active {
-                    RoundedRectangle(cornerRadius: 0)
-                        .stroke(Theme.border, lineWidth: 0.5)
-                }
-            }
+            .contentShape(Rectangle())   // full rect is hittable, not just the text glyphs
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            active ? .regular.tint(Theme.accent.opacity(0.15)).interactive() : .regular.interactive(),
+            in: .rect(cornerRadius: Theme.controlRadius, style: .continuous)
+        )
     }
 }

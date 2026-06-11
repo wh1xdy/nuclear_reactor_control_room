@@ -10,6 +10,11 @@ let package = Package(
         .executableTarget(
             name: "ReactorSim",
             path: "Sources/ReactorSim"
+        ),
+        .testTarget(
+            name: "ReactorSimTests",
+            dependencies: ["ReactorSim"],
+            path: "Tests/ReactorSimTests"
         )
     ]
 )

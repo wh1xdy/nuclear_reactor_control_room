@@ -6,7 +6,8 @@ import Foundation
 struct ControlInputs {
     var rodPosition: Double  = 0.0
     var primaryFlow: Double  = 1.0
-    var turbineValve: Double = 1.0
+    var turbineValve: Double = 1.0   // effective SG heat-removal valve (turbine or steam dump)
+    var turbineTripped: Bool = false // generator off the grid → 0 MWe even if dump flows
     var scram: Bool          = false
 }
 
@@ -66,26 +67,37 @@ final class PWRPlant {
         let nSteps = max(1, Int(ceil(dt / p.internalDt)))
         let dtSub  = dt / Double(nSteps)
 
+        // Rated power splits into fission + decay-heat shares so that at
+        // equilibrium (n=1, decay≈6.5%) total thermal power equals nominal.
+        let fissionShare = 1.0 - DecayHeat.equilibriumFraction
+
         for _ in 0..<nSteps {
             if scrammed {
                 rodPosEffective = min(1.0, rodPosEffective + dtSub / p.rodDropTau)
             } else {
-                rodPosEffective = max(0, min(1, ctrl.rodPosition))
+                // CRDM rate limit: rods WALK toward demand, never teleport.
+                // (Also prevents a reactivity step when a scram is reset with
+                // the demand lever left withdrawn.)
+                let demand  = max(0, min(1, ctrl.rodPosition))
+                let maxStep = p.rodSpeed * dtSub
+                rodPosEffective += max(-maxStep, min(maxStep, demand - rodPosEffective))
             }
             let rho   = computeReactivity(ctrl)
             kinetics.step(dt: dtSub, rho: rho)
             xenon.step(dt: dtSub, n: kinetics.n)
             let decay = decayHeat.step(dt: dtSub, n: kinetics.n)
-            let pTh   = (kinetics.n + decay) * p.nominalPower
+            let pTh   = (kinetics.n * fissionShare + decay) * p.nominalPower
             thermal.step(dt: dtSub, thermalPower: pTh, flow: ctrl.primaryFlow, turbineValve: ctrl.turbineValve)
             time += dtSub
         }
 
         return PlantSnapshot(
             time:              time,
-            powerFraction:     kinetics.n,
-            thermalPowerW:     (kinetics.n + decayHeat.fraction) * p.nominalPower,
-            electricPowerW:    thermal.electricPower,
+            // Fraction of RATED THERMAL power (fission share + decay heat) —
+            // reads 100% at steady full power regardless of decay-heat buildup.
+            powerFraction:     kinetics.n * fissionShare + decayHeat.fraction,
+            thermalPowerW:     (kinetics.n * fissionShare + decayHeat.fraction) * p.nominalPower,
+            electricPowerW:    ctrl.turbineTripped ? 0 : thermal.electricPower,
             fuelTempK:         thermal.tFuel,
             coolantTempK:      thermal.tCool,
             sgTempK:           thermal.tSG,

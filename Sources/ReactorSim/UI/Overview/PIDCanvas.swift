@@ -5,20 +5,21 @@
 import SwiftUI
 
 struct PIDCanvas: View {
-    let snapshot: PlantSnapshot
     let supervisor: PlantSupervisor
 
     var body: some View {
+        // snapshot is read HERE (leaf), not in the parent panel, so the glass
+        // panel subtree doesn't re-evaluate at 60 Hz with every physics tick.
         TimelineView(.animation) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             Canvas { ctx, size in
-                drawPWR(ctx: ctx, size: size, snap: snapshot, sup: supervisor, t: t)
+                drawPWR(ctx: ctx, size: size, snap: supervisor.snapshot, sup: supervisor, t: t)
             }
         }
-        .drawingGroup()
+        // No .drawingGroup(): offscreen Metal rasterization races the Liquid Glass
+        // backdrop and causes flicker during window drag.
         .background(Color(r: 8, g: 11, b: 16))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(CornerBrackets())
+        .clipShape(.rect(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 
     // MARK: — PWR layout (fractional of W × H so it always fills the panel)

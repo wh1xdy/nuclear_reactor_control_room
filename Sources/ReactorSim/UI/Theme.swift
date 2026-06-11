@@ -36,8 +36,10 @@ enum Theme {
     static let sliderFg   = Color(r: 48,  g: 144, b: 200)
 
     // MARK: — Sizing
-    static let cornerRadius: CGFloat    = 8
-    static let panelPadding: CGFloat    = 12
+    // Locked-in design: squircle (.continuous) corners — panels 16, controls 12.
+    static let panelRadius: CGFloat     = 16
+    static let controlRadius: CGFloat   = 12
+    static let panelPadding: CGFloat    = 16
     static let headerHeight: CGFloat    = 56
     static let tabHeight: CGFloat       = 36
     static let controlsWidth: CGFloat   = 300
@@ -74,17 +76,18 @@ extension Color {
         self.init(red: Double(r)/255, green: Double(g)/255, blue: Double(b)/255)
     }
 
-    /// Status color from power fraction
+    /// Status color from power fraction.
+    /// Restrained palette: white in normal range — ISA colors only when abnormal.
     static func powerStatus(_ pf: Double) -> Color {
-        if pf > 1.1  { return Theme.alarm }
-        if pf > 0.9  { return Theme.caution }
-        return Theme.normal
+        if pf > 1.1   { return Theme.alarm }
+        if pf > 1.05  { return Theme.caution }   // 100% is normal — amber only above
+        return Theme.text
     }
 
-    /// Status color from reactivity
+    /// Status color from reactivity — white unless abnormal.
     static func reactivityStatus(_ rho: Double) -> Color {
         if abs(rho) > 0.005 { return Theme.alarm }
         if abs(rho) > 0.001 { return Theme.caution }
-        return Theme.normal
+        return Theme.text
     }
 }

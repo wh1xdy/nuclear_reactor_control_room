@@ -1,5 +1,4 @@
-// ControlsPanel.swift — Left panel: sliders, toggles, SCRAM button.
-// Uses Liquid Glass for the panel surface on macOS 26+.
+// ControlsPanel.swift — Left panel with Liquid Glass throughout.
 
 import SwiftUI
 
@@ -9,152 +8,187 @@ struct ControlsPanel: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
-                PanelHeader(title: "CONTROLS")
+                // Section header
+                sectionLabel("CONTROLS")
 
-                VStack(spacing: 12) {
-                    DCSSlider(label: "ROD POSITION",
+                // Restrained palette: all sliders use the single electric-blue accent.
+                // Rod demand reads in steps withdrawn (0–228), real CRDM convention.
+                VStack(spacing: 18) {
+                    DCSSlider(label: "ROD DEMAND",
                               value: Binding(get: { supervisor.rodPosition },
                                             set: { supervisor.rodPosition = $0 }),
-                              displayStr: { "\(Int($0 * 100)) %" },
-                              color: Theme.accent)
-
-                    DCSSlider(label: "PRIMARY FLOW",
+                              displayStr: { "\(Int((228 * (1 - $0)).rounded())) SWD" })
+                    DCSSlider(label: "RCS FLOW",
                               value: Binding(get: { supervisor.primaryFlow },
                                             set: { supervisor.primaryFlow = $0 }),
-                              displayStr: { "\(Int($0 * 100)) %" },
-                              color: Theme.water)
-
-                    DCSSlider(label: "TURBINE VALVE",
+                              displayStr: { "\(Int($0 * 100)) %" })
+                    DCSSlider(label: "TBN GOV VALVE",
                               value: Binding(get: { supervisor.turbineValve },
                                             set: { supervisor.turbineValve = $0 }),
-                              displayStr: { "\(Int($0 * 100)) %" },
-                              color: Theme.steam)
-
-                    DCSSlider(label: "FEEDWATER VALVE",
+                              displayStr: { "\(Int($0 * 100)) %" })
+                    DCSSlider(label: "FW REG VALVE",
                               value: Binding(get: { supervisor.feedwaterValve },
                                             set: { supervisor.feedwaterValve = $0 }),
-                              displayStr: { "\(Int($0 * 100)) %" },
-                              color: Theme.twophase)
-
+                              displayStr: { "\(Int($0 * 100)) %" })
                     DCSSlider(label: "BORATION RATE",
                               value: Binding(get: { supervisor.borationRate },
                                             set: { supervisor.borationRate = $0 }),
-                              displayStr: { "\(Int($0 * 100)) %" },
-                              color: Theme.caution)
+                              displayStr: { "\(Int($0 * 100)) %" })
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+
+                sectionLabel("STATUS")
+                    .padding(.top, 6)
+
+                GlassEffectContainer(spacing: 4) {
+                    VStack(spacing: 4) {
+                        ToggleButton(label: "STARTUP PERMIT",
+                                     state: supervisor.startupPermit,
+                                     statusColor: Theme.accent, keyHint: "P") {
+                            supervisor.startupPermit = !supervisor.startupPermit
+                        }
+                        ToggleButton(label: "AUTO STARTUP SEQ",
+                                     state: supervisor.autoStartup,
+                                     statusColor: Theme.accent, keyHint: "U") {
+                            supervisor.autoStartup = !supervisor.autoStartup
+                        }
+                        ToggleButton(label: "ROD AUTO (T-AVG)",
+                                     state: supervisor.rodAutoEnabled,
+                                     statusColor: Theme.accent, keyHint: "O") {
+                            supervisor.rodAutoEnabled = !supervisor.rodAutoEnabled
+                        }
+                        ToggleButton(label: "TURBINE TRIP",
+                                     state: supervisor.turbineTrip,
+                                     statusColor: Theme.caution, keyHint: "T") {
+                            supervisor.turbineTrip = !supervisor.turbineTrip
+                        }
+                        ToggleButton(label: "PUMP DEGRADED",
+                                     state: supervisor.pumpDegraded,
+                                     statusColor: Theme.alarm, keyHint: "Z") {
+                            supervisor.pumpDegraded = !supervisor.pumpDegraded
+                        }
+                        ToggleButton(label: "FEEDWATER FAULT",
+                                     state: supervisor.feedwaterFault,
+                                     statusColor: Theme.alarm, keyHint: "X") {
+                            supervisor.feedwaterFault = !supervisor.feedwaterFault
+                        }
+                    }
                 }
                 .padding(.horizontal, 12)
-                .padding(.top, 8)
-
-                Divider().background(Theme.sep).padding(.vertical, 10).padding(.horizontal, 12)
-
-                VStack(spacing: 6) {
-                    ToggleButton(label: "STARTUP PERMIT",
-                                 state: supervisor.startupPermit,
-                                 statusColor: Theme.normal, keyHint: "P") {
-                        supervisor.startupPermit = !supervisor.startupPermit
-                    }
-                    ToggleButton(label: "TURBINE TRIP",
-                                 state: supervisor.turbineTrip,
-                                 statusColor: Theme.caution, keyHint: "T") {
-                        supervisor.turbineTrip = !supervisor.turbineTrip
-                    }
-                    ToggleButton(label: "PUMP DEGRADED",
-                                 state: supervisor.pumpDegraded,
-                                 statusColor: Theme.alarm, keyHint: "Z") {
-                        supervisor.pumpDegraded = !supervisor.pumpDegraded
-                    }
-                    ToggleButton(label: "FEEDWATER FAULT",
-                                 state: supervisor.feedwaterFault,
-                                 statusColor: Theme.alarm, keyHint: "X") {
-                        supervisor.feedwaterFault = !supervisor.feedwaterFault
-                    }
-                }
-                .padding(.horizontal, 12)
-
-                Divider().background(Theme.sep).padding(.vertical, 10).padding(.horizontal, 12)
 
                 ScramButton(supervisor: supervisor)
                     .padding(.horizontal, 12)
-                    .padding(.bottom, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 20)
             }
         }
-        .background {
-            // Liquid Glass: enable in Xcode 17 + macOS 26 SDK once confirmed:
-            // Rectangle().glassEffect(in: Rectangle())
-            Theme.panel
-        }
-        .overlay(alignment: .trailing) { Theme.border.frame(width: 1) }
+        .background(.ultraThinMaterial)
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Theme.textDim)
+            .tracking(2)
+            .padding(.leading, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
     }
 }
 
-// MARK: — Panel header with accent underline + corner brackets
+// MARK: — Slim PanelHeader used across all tabs
+// Pure glass design: plain tracked label, no material strip, no accent rule.
 struct PanelHeader: View {
     let title: String
-
     var body: some View {
-        ZStack(alignment: .leading) {
-            Theme.panelHdr
+        HStack {
             Text(title)
-                .font(Theme.readoutSm)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Theme.textHdr)
-                .padding(.leading, 12)
+                .tracking(1.8)
+            Spacer()
         }
-        .frame(height: 32)
-        .overlay(alignment: .bottom) { Theme.accent.frame(height: 1) }
-        .overlay(CornerBrackets())
+        .padding(.horizontal, Theme.panelPadding)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
     }
 }
 
-// MARK: — DCS Slider
+// MARK: — DCS Slider — industrial fader: thin groove, rectangular handle with
+// center notch, calibrated tick row. No glow, no glass ball.
 struct DCSSlider: View {
     let label: String
     @Binding var value: Double
     let displayStr: (Double) -> String
-    let color: Color
+    var color: Color = Theme.accent   // single accent — restrained palette
+
+    private let thumbW: CGFloat = 9
+    private let thumbH: CGFloat = 20
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label)
-                    .font(Theme.readoutSm)
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Theme.textDim)
+                    .tracking(0.5)
                 Spacer()
                 Text(displayStr(value))
-                    .font(Theme.readoutSm)
-                    .foregroundStyle(color)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
             }
             GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    // Track
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Theme.sliderBg)
-                        .frame(height: 14)
-
-                    // Fill
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(color)
-                        .frame(width: max(0, geo.size.width * value), height: 14)
-
-                    // Thumb
-                    Circle()
-                        .fill(Theme.text)
-                        .frame(width: 18, height: 18)
-                        .shadow(color: color.opacity(0.6), radius: 4)
-                        .offset(x: max(0, geo.size.width * value - 9))
+                let w = geo.size.width
+                VStack(spacing: 3) {
+                    ZStack(alignment: .leading) {
+                        // Groove
+                        Capsule()
+                            .fill(Color.black.opacity(0.45))
+                            .frame(height: 3)
+                        // Fill up to handle
+                        Capsule()
+                            .fill(color.opacity(0.55))
+                            .frame(width: max(0, (w - thumbW) * value + thumbW / 2), height: 3)
+                        // Fader handle: rectangle with index notch
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(Color(white: 0.82))
+                            .frame(width: thumbW, height: thumbH)
+                            .overlay(
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.55))
+                                    .frame(height: 1.2))
+                            .offset(x: (w - thumbW) * value)
+                    }
+                    .frame(height: thumbH)
+                    // Tick row: majors at 0/25/50/75/100%
+                    Canvas { ctx, size in
+                        for i in 0...20 {
+                            let major = i % 5 == 0
+                            let x = thumbW / 2 + (size.width - thumbW) * CGFloat(i) / 20
+                            var p = Path()
+                            p.move(to: .init(x: x, y: 0))
+                            p.addLine(to: .init(x: x, y: major ? size.height : size.height * 0.5))
+                            ctx.stroke(p, with: .color(.white.opacity(major ? 0.30 : 0.14)),
+                                       lineWidth: 1)
+                        }
+                    }
+                    .frame(height: 5)
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { g in
-                        value = max(0, min(1, g.location.x / geo.size.width))
+                        let x = g.location.x - thumbW / 2
+                        value = max(0, min(1, x / max(1, w - thumbW)))
                     }
                 )
             }
-            .frame(height: 18)
+            .frame(height: 28)
         }
     }
 }
 
-// MARK: — Toggle Button (bordered, glass-style)
+// MARK: — Toggle Button (glass)
 struct ToggleButton: View {
     let label: String
     let state: Bool
@@ -164,41 +198,33 @@ struct ToggleButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack {
-                // LED
+            HStack(spacing: 8) {
                 Circle()
-                    .fill(state ? statusColor : Theme.border)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: state ? statusColor.opacity(0.8) : .clear, radius: 4)
-
+                    .fill(state ? statusColor : Color.white.opacity(0.2))
+                    .frame(width: 6, height: 6)
+                    .shadow(color: state ? statusColor : .clear, radius: 4)
                 Text(label)
-                    .font(Theme.readoutSm)
-                    .foregroundStyle(state ? statusColor : Theme.textDim)
-
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(state ? .white : Theme.textDim)
                 Spacer()
-
                 Text("[\(keyHint)]")
-                    .font(Theme.readoutSm)
-                    .foregroundStyle(Theme.textDim)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Theme.textDim.opacity(0.6))
             }
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background(
-                state
-                    ? statusColor.opacity(0.12)
-                    : Theme.panel,
-                in: RoundedRectangle(cornerRadius: 5)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 5)
-                    .stroke(state ? statusColor : Theme.border, lineWidth: 1)
-            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            state
+                ? .regular.tint(statusColor.opacity(0.2)).interactive()
+                : .regular.interactive(),
+            in: .rect(cornerRadius: Theme.controlRadius, style: .continuous)
+        )
     }
 }
 
-// MARK: — SCRAM Button
+// MARK: — SCRAM Button (glass with red tint)
 struct ScramButton: View {
     let supervisor: PlantSupervisor
     @State private var blink = false
@@ -209,60 +235,30 @@ struct ScramButton: View {
             if supervisor.scrammed { supervisor.resetScram() }
             else { supervisor.triggerScram() }
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 if supervisor.scrammed {
                     Text("⚠  SCRAM ACTIVE")
-                        .font(Theme.readoutMd)
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white)
                     Text("tap to reset")
-                        .font(Theme.readoutSm)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
                 } else {
                     Text("SCRAM")
-                        .font(Theme.readoutLg)
+                        .font(.system(size: 22, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white)
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 60)
-            .background(
-                supervisor.scrammed
-                    ? (blink ? Theme.alarm : Theme.alarm.opacity(0.6))
-                    : Color(r: 80, g: 18, b: 18),
-                in: RoundedRectangle(cornerRadius: 8)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Theme.alarm, lineWidth: 2)
-            )
+            .frame(height: 64)
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            supervisor.scrammed
+                ? .regular.tint(Theme.alarm.opacity(blink ? 0.5 : 0.2)).interactive()
+                : .regular.tint(Theme.alarm.opacity(0.15)).interactive(),
+            in: .rect(cornerRadius: Theme.controlRadius, style: .continuous)
+        )
         .onReceive(timer) { _ in blink.toggle() }
-    }
-}
-
-// MARK: — Corner brackets decoration
-struct CornerBrackets: View {
-    var color: Color = Theme.accent
-    var arm: CGFloat = 8
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width; let h = geo.size.height
-            Canvas { ctx, _ in
-                let c = GraphicsContext.Shading.color(color)
-                func bracket(x: CGFloat, y: CGFloat, dx: CGFloat, dy: CGFloat) {
-                    var h1 = Path(); h1.move(to: CGPoint(x: x, y: y)); h1.addLine(to: CGPoint(x: x + dx*arm, y: y))
-                    var v1 = Path(); v1.move(to: CGPoint(x: x, y: y)); v1.addLine(to: CGPoint(x: x, y: y + dy*arm))
-                    ctx.stroke(h1, with: c, lineWidth: 1)
-                    ctx.stroke(v1, with: c, lineWidth: 1)
-                }
-                bracket(x: 0,   y: 0,   dx:  1, dy:  1)
-                bracket(x: w,   y: 0,   dx: -1, dy:  1)
-                bracket(x: 0,   y: h,   dx:  1, dy: -1)
-                bracket(x: w,   y: h,   dx: -1, dy: -1)
-            }
-        }
-        .allowsHitTesting(false)
     }
 }

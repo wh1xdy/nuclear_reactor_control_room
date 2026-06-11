@@ -7,22 +7,22 @@ struct OverviewTab: View {
     let supervisor: PlantSupervisor
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Center: P&ID + status readouts
-            VStack(spacing: 8) {
+        HStack(spacing: 12) {
+            // Center: P&ID + wide strip charts (2×2 — proper chart proportions)
+            VStack(spacing: 12) {
                 PIDPanel(supervisor: supervisor)
-                StatusReadoutsPanel(supervisor: supervisor)
+                TrendsPanel(supervisor: supervisor)
             }
             .frame(maxWidth: .infinity)
 
-            // Right: instruments + trends
-            VStack(spacing: 8) {
+            // Right: instruments + dense status column
+            VStack(spacing: 12) {
                 InstrumentPanel(supervisor: supervisor)
-                TrendsPanel(supervisor: supervisor)
+                StatusReadoutsPanel(supervisor: supervisor)
             }
-            .frame(width: 280)
+            .frame(width: 330)
         }
-        .padding(8)
+        .padding(12)
     }
 }
 
@@ -32,14 +32,11 @@ private struct PIDPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: "PLANT OVERVIEW — PWR")
-            PIDCanvas(snapshot: supervisor.snapshot, supervisor: supervisor)
+            PIDCanvas(supervisor: supervisor)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(8)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
         .frame(maxWidth: .infinity)
         .frame(height: 320)
     }
@@ -50,50 +47,72 @@ private struct StatusReadoutsPanel: View {
     let supervisor: PlantSupervisor
     var body: some View {
         let snap = supervisor.snapshot
+        // Rod position in steps withdrawn (0–228), real CRDM convention
+        let rodSWD = Int((Double(228) * (1.0 - snap.rodPosition)).rounded())
         VStack(spacing: 0) {
             PanelHeader(title: "PLANT STATUS")
-            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 6) {
-                statusRow("Core power",    (snap.powerFraction*100).fmt("%.2f %%"),
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
+                statusRow("RX POWER",     (snap.powerFraction*100).fmt("%6.2f"), "%",
                           .powerStatus(snap.powerFraction))
-                statusRow("Thermal power", (snap.thermalPowerW/1e6).fmt("%.1f MWt"), Theme.text)
-                statusRow("Electric power",(snap.electricPowerW/1e6).fmt("%.1f MWe"), Theme.text)
+                statusRow("THERMAL PWR",  (snap.thermalPowerW/1e6).fmt("%6.1f"), "MWt", Theme.text)
+                statusRow("GROSS ELEC",   (snap.electricPowerW/1e6).fmt("%6.1f"), "MWe", Theme.text)
                 Divider().background(Theme.sep)
-                statusRow("Reactivity",    snap.reactivity.fmt("%+.5f Δk/k"),
+                statusRow("REACTIVITY",   (snap.reactivity*1e5).fmt("%+6.0f"), "pcm",
                           .reactivityStatus(snap.reactivity))
-                statusRow("Xenon worth",   (snap.xenonInventory * -1.6e-5).fmt("%+.5f Δk/k"), Theme.textDim)
+                statusRow("XENON WORTH",  (snap.xenonInventory * -1.6e-5 * 1e5).fmt("%+6.0f"), "pcm", Theme.textDim)
+                statusRow("RODS D-BANK",  "\(rodSWD)", "SWD", Theme.text)
                 Divider().background(Theme.sep)
-                statusRow("Fuel temp",     snap.fuelTempK.fmt("%.1f K"),
-                          snap.fuelTempK > 1400 ? Theme.alarm : snap.fuelTempK > 1200 ? Theme.caution : Theme.normal)
-                statusRow("Coolant temp",  snap.coolantTempK.fmt("%.1f K"),
-                          snap.coolantTempK > 616 ? Theme.alarm : snap.coolantTempK > 580 ? Theme.caution : Theme.normal)
-                statusRow("Steam temp",    snap.sgTempK.fmt("%.1f K"), Theme.text)
+                statusRow("T-FUEL AVG",   snap.fuelTempK.fmt("%6.1f"), "K",
+                          snap.fuelTempK > 1400 ? Theme.alarm : snap.fuelTempK > 1200 ? Theme.caution : Theme.text)
+                statusRow("RCS T-AVG",    snap.coolantTempK.fmt("%6.1f"), "K",
+                          snap.coolantTempK > 616 ? Theme.alarm : snap.coolantTempK > 580 ? Theme.caution : Theme.text)
+                statusRow("SG TEMP",      snap.sgTempK.fmt("%6.1f"), "K", Theme.text)
                 Divider().background(Theme.sep)
-                statusRow("Pressure",      supervisor.pressureMPa.fmt("%.3f MPa"),
-                          supervisor.pressureMPa > 17.0 ? Theme.alarm : supervisor.pressureMPa > 16.3 ? Theme.caution : Theme.normal)
-                statusRow("Boron",         supervisor.boronPPM.fmt("%.1f ppm"),
+                statusRow("PZR PRESS",    supervisor.pressureMPa.fmt("%6.3f"), "MPa",
+                          supervisor.pressureMPa > 17.0 ? Theme.alarm : supervisor.pressureMPa > 16.3 ? Theme.caution : Theme.text)
+                statusRow("RCS BORON",    supervisor.boronPPM.fmt("%6.1f"), "ppm",
                           supervisor.boronPPM < 100 ? Theme.caution : Theme.text)
-                statusRow("Decay heat",    (snap.decayHeatFraction*100).fmt("%.2f %%"),
+                statusRow("DECAY HEAT",   (snap.decayHeatFraction*100).fmt("%6.2f"), "%",
                           snap.decayHeatFraction > 0.03 ? Theme.caution : Theme.text)
+                Divider().background(Theme.sep)
+                statusRow("RCP SPEED",    (supervisor.omegaRCP*100).fmt("%6.1f"), "%",
+                          supervisor.omegaRCP < 0.87 ? Theme.caution : Theme.text)
+                statusRow("RCS FLOW",     (supervisor.primaryFlow*supervisor.omegaRCP*100).fmt("%6.1f"), "%", Theme.text)
+                statusRow("FW INV",       supervisor.feedwaterInv.fmt("%6.3f"), "rel",
+                          supervisor.feedwaterInv < 0.1 ? Theme.alarm : Theme.text)
+                statusRow("STEAM INV",    supervisor.steamInv.fmt("%6.3f"), "rel",
+                          supervisor.steamInv < 0.3 ? Theme.alarm : Theme.text)
+                statusRow("COND TEMP",    supervisor.condTempK.fmt("%6.1f"), "K",
+                          supervisor.condTempK > 330 ? Theme.caution : Theme.text)
+                statusRow("STM DUMP",     (supervisor.steamDumpValve*100).fmt("%6.1f"), "%",
+                          supervisor.steamDumpValve > 0 ? Theme.caution : Theme.text)
+                statusRow("TBN BREAKER",  supervisor.turbineTrip ? "OPEN" : "CLOSED", "",
+                          supervisor.turbineTrip ? Theme.alarm : Theme.text)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Theme.panelPadding)
+            .padding(.vertical, 10)
+            Spacer(minLength: 0)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
-        .frame(maxWidth: .infinity)
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func statusRow(_ label: String, _ value: String, _ color: Color) -> some View {
+    // Label / value / unit columns — values right-aligned, fixed decimals
+    private func statusRow(_ label: String, _ value: String, _ unit: String,
+                           _ color: Color) -> some View {
         GridRow {
             Text(label)
-                .font(Theme.readout)
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textDim)
+                .tracking(0.5)
             Text(value)
-                .font(Theme.readout)
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .foregroundStyle(color)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+            Text(unit)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Theme.textDim.opacity(0.8))
+                .frame(width: 34, alignment: .leading)
         }
     }
 }
@@ -108,7 +127,7 @@ private struct InstrumentPanel: View {
             HStack(alignment: .top, spacing: 8) {
                 // Power arc gauge
                 VStack(spacing: 4) {
-                    Text("POWER")
+                    Text("RX POWER")
                         .font(Theme.readoutSm)
                         .foregroundStyle(Theme.textDim)
                     ArcGaugeView(value: snap.powerFraction * 100, lo: 0, hi: 130,
@@ -117,48 +136,46 @@ private struct InstrumentPanel: View {
                 .frame(maxWidth: .infinity)
 
                 // Bar meters
-                HStack(alignment: .top, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
                     BarMeterView(value: supervisor.pressureMPa, lo: 0, hi: 18,
-                                 label: "PRESS", unit: "MPa", tripHi: 16.7)
+                                 label: "PZR PRESS", unit: "MPa", tripHi: 17.0, warnHi: 16.3)
                     BarMeterView(value: snap.fuelTempK, lo: 300, hi: 1800,
-                                 label: "FUEL T", unit: "K",   tripHi: 1400)
+                                 label: "T-FUEL", unit: "K",   tripHi: 1500, warnHi: 1400)
                     BarMeterView(value: snap.coolantTempK, lo: 300, hi: 700,
-                                 label: "COOL T", unit: "K",   tripHi: 616)
+                                 label: "RCS T-AVG", unit: "K",   tripHi: 620, warnHi: 610)
                 }
                 .frame(maxWidth: .infinity)
             }
-            .padding(10)
+            .padding(12)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
         .frame(height: 180)
     }
 }
 
-// MARK: — Trends panel
+// MARK: — Trends panel — 2×2 grid of WIDE strip charts (≈2.5:1, not towers)
 private struct TrendsPanel: View {
     let supervisor: PlantSupervisor
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: "TRENDS")
-            VStack(spacing: 6) {
-                TrendView(values: supervisor.orderedHistory(supervisor.histPower),
-                          yLo: 0, yHi: 130, color: Theme.normal, label: "Core power (%)")
-                TrendView(values: supervisor.orderedHistory(supervisor.histReact),
-                          yLo: -0.01, yHi: 0.01, color: Theme.accent, label: "Reactivity (Δk/k)")
-                TrendView(values: supervisor.orderedHistory(supervisor.histFuelT),
-                          yLo: 400, yHi: 1800, color: Theme.warning, label: "Fuel temp (K)")
-                TrendView(values: supervisor.orderedHistory(supervisor.histDecay),
-                          yLo: 0, yHi: 10, color: Theme.caution, label: "Decay heat (%)")
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    TrendView(values: supervisor.orderedHistory(supervisor.histPower),
+                              yLo: 0, yHi: 130, color: Theme.accent, label: "RX POWER %")
+                    TrendView(values: supervisor.orderedHistory(supervisor.histReact).map { $0 * 1e5 },
+                              yLo: -1000, yHi: 1000, color: Theme.accent, label: "REACTIVITY pcm")
+                }
+                HStack(spacing: 10) {
+                    TrendView(values: supervisor.orderedHistory(supervisor.histFuelT),
+                              yLo: 400, yHi: 1800, color: Theme.accent, label: "T-FUEL K")
+                    TrendView(values: supervisor.orderedHistory(supervisor.histDecay),
+                              yLo: 0, yHi: 10, color: Theme.accent, label: "DECAY HEAT %")
+                }
             }
-            .padding(8)
+            .padding(Theme.panelPadding)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
         .frame(maxHeight: .infinity)
     }
 }

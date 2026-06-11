@@ -1,4 +1,4 @@
-// HeaderBar.swift — Top bar: facility ID, sim clock, speed, alarm indicator.
+// HeaderBar.swift — Liquid Glass header strip.
 
 import SwiftUI
 
@@ -9,53 +9,68 @@ struct HeaderBar: View {
 
     var body: some View {
         ZStack {
-            Theme.panelHdr
+            // Transparent — inherits window background so no seam at top
+            Color.clear
 
-            HStack(spacing: 16) {
-                // Facility name
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 0) {
+                // Facility nameplate
+                VStack(alignment: .leading, spacing: 1) {
                     Text("UNIT 1")
-                        .font(Theme.readoutLg)
-                        .foregroundStyle(Theme.text)
+                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
                     Text("PRESSURISED WATER REACTOR PLANT")
                         .font(Theme.readoutSm)
                         .foregroundStyle(Theme.textDim)
                 }
-                .padding(.leading, 20)
+                .padding(.leading, 22)
+                .padding(.vertical, 10)
 
                 Spacer()
 
-                // Sim clock
-                VStack(alignment: .center, spacing: 1) {
-                    Text("SIM TIME")
-                        .font(Theme.readoutSm)
-                        .foregroundStyle(Theme.textDim)
-                    Text(clockString)
-                        .font(Theme.readoutMd)
-                        .foregroundStyle(Theme.accent)
-                }
+                // Sim clock + speed — glass pill
+                HStack(spacing: 16) {
+                    // Leaf view: isolates the 60 Hz snapshot.time re-evaluation
+                    // so the glass pill subtree isn't rebuilt every physics tick.
+                    SimClock(supervisor: supervisor)
 
-                // Speed control
-                Button(action: onSpeedCycle) {
-                    Text("×\(timeSpeed)")
-                        .font(Theme.readoutMd)
-                        .foregroundStyle(timeSpeed > 1 ? Theme.caution : Theme.textDim)
-                        .frame(width: 60, height: 30)
-                        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+                    Button(action: onSpeedCycle) {
+                        Text("×\(timeSpeed)")
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            // Accelerated time is an active selection, not a warning.
+                            .foregroundStyle(timeSpeed > 1 ? Theme.accent : Theme.textDim)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 8)
+                .glassEffect(.regular, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
+                .padding(.horizontal, 20)
 
                 Spacer()
 
                 // Alarm/trip indicator
                 AlarmIndicator(supervisor: supervisor)
-                    .frame(width: 220, height: 40)
+                    .frame(width: 230, height: 36)
                     .padding(.trailing, 20)
             }
         }
-        .overlay(alignment: .bottom) {
-            Theme.border.frame(height: 1)
+    }
+}
+
+private struct SimClock: View {
+    let supervisor: PlantSupervisor
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text("SIM TIME")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(Theme.textDim)
+            Text(clockString)
+                .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
         }
     }
 
@@ -77,35 +92,44 @@ private struct AlarmIndicator: View {
 
         Group {
             if hasTrips {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(blink ? Theme.alarm : Theme.alarm.opacity(0.5))
-                    .overlay(
-                        Text("▶  REACTOR TRIP")
-                            .font(Theme.readoutMd)
-                            .foregroundStyle(.white)
-                    )
+                HStack(spacing: 8) {
+                    Circle().fill(blink ? Theme.alarm : Theme.alarm.opacity(0.5))
+                        .frame(width: 8, height: 8)
+                        .shadow(color: Theme.alarm, radius: blink ? 6 : 2)
+                    Text("REACTOR TRIP")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 16)
+                .glassEffect(.regular.tint(Theme.alarm.opacity(0.3)).interactive(),
+                             in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
             } else if hasAlarms {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(blink ? Theme.caution : Theme.caution.opacity(0.4))
-                    .overlay(
-                        Text("▶  ALARM")
-                            .font(Theme.readoutMd)
-                            .foregroundStyle(.white)
-                    )
+                HStack(spacing: 8) {
+                    Circle().fill(blink ? Theme.caution : Theme.caution.opacity(0.5))
+                        .frame(width: 8, height: 8)
+                        .shadow(color: Theme.caution, radius: 4)
+                    Text("ALARM ACTIVE")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 16)
+                .glassEffect(.regular.tint(Theme.caution.opacity(0.2)),
+                             in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
             } else {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(r: 14, g: 36, b: 14))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color(r: 30, g: 80, b: 30), lineWidth: 1)
-                    )
-                    .overlay(
-                        Text("ALL SYSTEMS NORMAL")
-                            .font(Theme.readoutSm)
-                            .foregroundStyle(Theme.normal)
-                    )
+                // Normal state stays quiet — no ISA green on a non-alarm condition.
+                HStack(spacing: 8) {
+                    Circle().fill(Color.white.opacity(0.35))
+                        .frame(width: 7, height: 7)
+                    Text("ALL SYSTEMS NORMAL")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Theme.textDim)
+                }
+                .padding(.horizontal, 16)
+                .glassEffect(.regular,
+                             in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
             }
         }
+        .frame(maxWidth: .infinity)
         .onReceive(timer) { _ in blink.toggle() }
     }
 }

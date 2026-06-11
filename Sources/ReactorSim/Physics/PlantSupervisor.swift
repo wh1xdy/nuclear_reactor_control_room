@@ -34,6 +34,15 @@ final class PlantSupervisor {
     var pumpDegraded:    Bool   = false
     var feedwaterFault:  Bool   = false
 
+    // MARK: — Automation (all default OFF — manual operation is the trainer's
+    // baseline; auto control is the realistic option, not the default)
+    var rodAutoEnabled:  Bool   = false   // holds RCS T-avg at 550 K
+    var pzrAutoEnabled:  Bool   = false   // heaters + spray hold 15.5 MPa
+    var fwAutoEnabled:   Bool   = false   // holds FW inventory at 1.0
+    var autoStartup:     Bool   = false   // sequencer: shutdown → full power
+    private(set) var startupPhase: String = "STANDBY"
+    private var _seqPhase: Int = 0        // 0 standby, 1 rod withdrawal, 2 ascension
+
     // MARK: — Readable plant state (UI reads)
     private(set) var snapshot:     PlantSnapshot
     private(set) var pressureMPa:  Double = 15.5
@@ -43,6 +52,7 @@ final class PlantSupervisor {
     private(set) var omegaRCP:     Double = 1.0
     private(set) var porvOpen:     Bool   = false
     private(set) var eccsActuated: Bool   = false
+    private(set) var steamDumpValve: Double = 0   // condenser dump (post-trip heat sink)
     private(set) var condTempK:    Double = 305.0
     private(set) var alarms:       [ReactorAlarm] = []
     private(set) var trips:        [String] = []
@@ -66,6 +76,11 @@ final class PlantSupervisor {
     private let _histLen:     Int  = 600
     // Xenon peak tracking for transient detection
     private var _xeMax:       Double = 0.0
+    // Equilibrium Xe inventory at full power (computed once, not per frame)
+    private let _xeEquilibrium: Double = {
+        let p = PlantParams()
+        return p.gammaXe / (p.lambdaXe + p.xenonBurnCoeff)
+    }()
 
     init() {
         let p = PlantParams()
@@ -90,11 +105,23 @@ final class PlantSupervisor {
     // MARK: — Step
 
     func step(dt: Double) {
+        updateAutomation(dt: dt)
+        // Turbine trips automatically on reactor scram (standard interlock).
+        if scrammed { turbineTrip = true }
+        // With the turbine tripped, condenser STEAM DUMP becomes the SG heat
+        // sink: a proportional valve holds no-load T_avg ≈ 550 K. Without it,
+        // stored + decay heat bottles up the SG and the plant overheats with
+        // no recovery path.
+        let effectiveValve = turbineTrip
+            ? max(0, min(0.2, 0.02 * (snapshot.coolantTempK - 550.0)))
+            : turbineValve
+        steamDumpValve = turbineTrip ? effectiveValve : 0
         let ctrl = ControlInputs(
-            rodPosition:  rodPosition,
-            primaryFlow:  primaryFlow * omegaRCP,
-            turbineValve: turbineValve,
-            scram:        scrammed
+            rodPosition:    rodPosition,
+            primaryFlow:    primaryFlow * omegaRCP,
+            turbineValve:   effectiveValve,
+            turbineTripped: turbineTrip,
+            scram:          scrammed
         )
         snapshot = plant.step(dt: dt, ctrl: ctrl)
         scrammed = snapshot.scrammed
@@ -117,16 +144,84 @@ final class PlantSupervisor {
             scramMessage = "RESET BLOCKED — rods not fully inserted"; return
         }
         guard trips.isEmpty else {
-            scramMessage = "RESET BLOCKED — active trips present"; return
+            scramMessage = "RESET BLOCKED — active trips present (acknowledge first)"; return
         }
         scrammed = false
         plant.resetScram()
+        // Demand follows actual position after a trip reset: rods stay inserted
+        // until the operator deliberately withdraws (real CRDM behavior).
+        rodPosition = snapshot.rodPosition
         scramMessage = "SCRAM RESET APPROVED"
     }
 
     func acknowledgeAllAlarms() {
         for key in _alarmMap.keys { _alarmMap[key]?.state = "ack" }
         _rebuildAlarmLists()
+    }
+
+    // MARK: — Automation
+
+    private func updateAutomation(dt: Double) {
+        // ── Startup sequencer (semi-automatic power ascension, APR1400-style) ──
+        if autoStartup {
+            if scrammed {
+                startupPhase = "HOLD — SCRAM (reset first)"
+                _seqPhase = 0
+            } else if !startupPermit {
+                startupPhase = "HOLD — NO STARTUP PERMIT"
+            } else {
+                let pf = snapshot.powerFraction
+                if _seqPhase == 0 { _seqPhase = 1 }
+                if _seqPhase == 1 {
+                    // Turbine stays TRIPPED here: criticality is approached
+                    // against the steam dump holding T-avg ≈ 550 K. Re-latching
+                    // a wide-open turbine at 3% power would be a cold-water
+                    // reactivity excursion.
+                    startupPhase = "ROD WITHDRAWAL — DUMP HOLDS T-AVG"
+                    turbineTrip = true
+                    rodPosition = max(0, rodPosition - 0.0053 * dt)   // CRDM max rate
+                    feedwaterValve = max(feedwaterValve, 0.30)
+                    fwAutoEnabled = true
+                    if pf >= 0.15 {
+                        _seqPhase = 2
+                        turbineTrip  = false
+                        turbineValve = 0.05           // roll turbine from hot standby
+                        rodAutoEnabled = true         // T-avg program takes the rods
+                    }
+                }
+                if _seqPhase == 2 {
+                    startupPhase = "POWER ASCENSION — RAMPING TURBINE"
+                    turbineValve = min(1.0, turbineValve + 0.005 * dt)
+                    if pf >= 0.98 && turbineValve >= 0.999 {
+                        startupPhase = "AT POWER — SEQ COMPLETE"
+                        autoStartup = false           // hands over to rod auto
+                        _seqPhase = 0
+                    }
+                }
+            }
+        } else {
+            if !scrammed { startupPhase = "STANDBY" }
+            _seqPhase = 0
+        }
+
+        // ── Rod auto-control: hold RCS T-avg at 550 K (0.5 K deadband).
+        // Drives the DEMAND at CRDM speed; actual rods are rate-limited anyway.
+        if rodAutoEnabled && !scrammed && snapshot.powerFraction > 0.02 {
+            let err = snapshot.coolantTempK - 550.0
+            if abs(err) > 0.5 {
+                // hot → insert (demand up), cold → withdraw
+                let rate = max(-1.0, min(1.0, err * 0.2)) * 0.0053
+                rodPosition = max(0, min(1, rodPosition + rate * dt))
+            }
+        }
+
+        // ── Feedwater auto: power feedforward + inventory correction, slewed.
+        if fwAutoEnabled && !feedwaterFault {
+            let pf = max(0, snapshot.powerFraction)
+            let target = 0.7 * pf + 0.8 * (1.0 - feedwaterInv)
+            let dv = max(-0.05 * dt, min(0.05 * dt, target - feedwaterValve))
+            feedwaterValve = max(0, min(1, feedwaterValve + dv))
+        }
     }
 
     // MARK: — BOP
@@ -139,25 +234,43 @@ final class PlantSupervisor {
             omegaRCP = min(1.0, omegaRCP + dt / 30.0)
         }
 
-        // Steam inventory: SG produces steam proportional to heat input, turbine removes it
-        let steamProduction = snapshot.powerFraction * turbineValve * 0.06 * dt
-        let steamConsumption = turbineTrip ? 0.0 : turbineValve * 0.08 * dt
+        // Steam inventory: SG production follows core heat; the turbine removes it.
+        // Matched coefficients (0.08/0.08) so it balances at steady state, and
+        // consumption scales with available inventory so the balance is
+        // self-regulating (settles at inv ≈ power/valve) instead of drifting
+        // to a clamp on any tiny power/valve mismatch.
+        let steamProduction  = max(0, snapshot.powerFraction) * 0.08 * dt
+        let steamConsumption = turbineTrip
+            ? 0.0
+            : turbineValve * 0.08 * min(1.0, max(0.0, steamInv)) * dt
         steamInv = max(0, min(2.0, steamInv + steamProduction - steamConsumption))
 
-        // Condenser temp: rises with steam flow, drops toward cooling water temp
+        // Condenser temp: first-order ODE solved EXACTLY (stable at 600× speed;
+        // explicit Euler diverges for dt > 2.5 s with this 0.8/s rate constant).
         let steamHeat  = turbineTrip ? 0.0 : turbineValve * snapshot.powerFraction * 5.0
-        condTempK += (steamHeat - (condTempK - 305.0) * 0.8) * dt
-        condTempK  = max(300.0, min(370.0, condTempK))
+        let condTarget = 305.0 + steamHeat / 0.8
+        condTempK = condTarget + (condTempK - condTarget) * exp(-0.8 * dt)
+        condTempK = max(300.0, min(370.0, condTempK))
 
-        // Feedwater balance (fault or turbine trip stops feedwater)
-        let fwIn  = (feedwaterFault || turbineTrip) ? 0.0 : feedwaterValve * 0.08 * dt
+        // Feedwater balance (fault or turbine trip stops feedwater).
+        // In = valve·0.10, out = power·0.07 → balances at valve 0.70 for 100%
+        // power, matching the default valve position (no spurious LOW_FEED).
+        let fwIn  = (feedwaterFault || turbineTrip) ? 0.0 : feedwaterValve * 0.10 * dt
         let fwOut = max(0, snapshot.powerFraction) * 0.07 * dt
         feedwaterInv = max(0, min(1.2, feedwaterInv + fwIn - fwOut))
 
-        // Pressurizer: slow drift toward 15.5 MPa + small coolant-temp coupling
-        // Coefficient kept small so normal ops don't trip HIGH_PRESS
-        let pTarget = 15.5 + (snapshot.coolantTempK - 550.0) * 0.02
-        pressureMPa += (pTarget - pressureMPa) * 0.02 * dt
+        // Pressurizer: relax toward target, exact exponential (600×-stable).
+        // Asymmetric coupling: overheating spikes pressure so the 17.0 MPa
+        // HIGH_PRESS trip is reachable; on cooldown the heaters hold pressure —
+        // a post-scram cooldown must not sail below the 11.5 MPa ECCS setpoint.
+        // PZR AUTO (heaters + spray) damps the coupling and reacts faster, but
+        // spray can't fully mask a severe overheat (trip still reachable).
+        let dT = snapshot.coolantTempK - 550.0
+        let pTarget = pzrAutoEnabled
+            ? 15.5 + (dT > 0 ? dT * 0.03 : dT * 0.004)
+            : 15.5 + (dT > 0 ? dT * 0.05 : dT * 0.01)
+        let pRate = pzrAutoEnabled ? 0.05 : 0.02
+        pressureMPa = pTarget + (pressureMPa - pTarget) * exp(-pRate * dt)
         pressureMPa = max(10.0, min(17.5, pressureMPa))
 
         // PORV
@@ -193,8 +306,7 @@ final class PlantSupervisor {
         _check("LOW_FEED",    feedwaterInv < 0.1,      2, "LOW FEEDWATER INVENTORY",          isTrip: false)
         // Xenon transient: Xe well above equilibrium AND power below 50%
         _xeMax = max(_xeMax, s.xenonInventory)
-        let xeEq = PlantParams().gammaXe / (PlantParams().lambdaXe + PlantParams().xenonBurnCoeff)
-        _check("XE_TRANSIENT", s.xenonInventory > xeEq * 1.4 && s.powerFraction < 0.5,
+        _check("XE_TRANSIENT", s.xenonInventory > _xeEquilibrium * 1.4 && s.powerFraction < 0.5,
                3, "XENON TRANSIENT IN PROGRESS", isTrip: false)
 
         // Auto-trip on any unacknowledged trip
@@ -216,7 +328,12 @@ final class PlantSupervisor {
                                              isFirstOut: fo, simTime: snapshot.time)
             }
         } else {
-            _alarmMap.removeValue(forKey: id)
+            // Annunciator latching: an alarm whose condition has cleared stays
+            // on the board until ACKNOWLEDGED (so first-out evidence survives,
+            // and a trip can't silently reset itself).
+            if let a = _alarmMap[id], a.state == "ack" {
+                _alarmMap.removeValue(forKey: id)
+            }
         }
     }
 
