@@ -13,48 +13,47 @@ struct HeaderBar: View {
             Color.clear
 
             HStack(spacing: 0) {
-                // Facility nameplate
-                VStack(alignment: .leading, spacing: 1) {
+                // Facility nameplate — utility bar scale, not a billboard
+                HStack(spacing: 10) {
                     Text("UNIT 1")
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white)
-                    Text("PRESSURISED WATER REACTOR PLANT")
-                        .font(Theme.readoutSm)
+                    Text("PWR  3000 MWt")
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Theme.textDim)
                 }
-                .padding(.leading, 22)
-                .padding(.vertical, 10)
+                .padding(.leading, 18)
 
                 Spacer()
 
                 // Sim clock + speed — glass pill
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     // Leaf view: isolates the 60 Hz snapshot.time re-evaluation
                     // so the glass pill subtree isn't rebuilt every physics tick.
                     SimClock(supervisor: supervisor)
 
                     Button(action: onSpeedCycle) {
                         Text("×\(timeSpeed)")
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             // Accelerated time is an active selection, not a warning.
                             .foregroundStyle(timeSpeed > 1 ? Theme.accent : Theme.textDim)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: Capsule())
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 5)
                 .glassEffect(.regular, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 16)
 
                 Spacer()
 
                 // Alarm/trip indicator
                 AlarmIndicator(supervisor: supervisor)
-                    .frame(width: 230, height: 36)
-                    .padding(.trailing, 20)
+                    .frame(width: 210, height: 28)
+                    .padding(.trailing, 16)
             }
         }
     }
@@ -64,12 +63,12 @@ private struct SimClock: View {
     let supervisor: PlantSupervisor
 
     var body: some View {
-        VStack(spacing: 1) {
+        HStack(spacing: 8) {
             Text("SIM TIME")
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
                 .foregroundStyle(Theme.textDim)
             Text(clockString)
-                .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white)
         }
     }

@@ -104,14 +104,14 @@ struct PanelHeader: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Theme.textHdr)
-                .tracking(1.8)
+                .tracking(1.6)
             Spacer()
         }
         .padding(.horizontal, Theme.panelPadding)
-        .padding(.top, 14)
-        .padding(.bottom, 4)
+        .padding(.top, 10)
+        .padding(.bottom, 3)
     }
 }
 
