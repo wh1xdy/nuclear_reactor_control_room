@@ -94,11 +94,16 @@ struct AlarmsTab: View {
                 Spacer(minLength: 0)
                 HStack {
                     Spacer()
-                    Button("ACKNOWLEDGE ALL [C]") { supervisor.acknowledgeAllAlarms() }
-                        .font(Theme.readoutSm)
-                        .foregroundStyle(Theme.accent)
-                        .buttonStyle(.plain)
-                        .padding(10)
+                    Button {
+                        supervisor.acknowledgeAllAlarms()
+                    } label: {
+                        Text("ACKNOWLEDGE ALL [C]")
+                            .font(Theme.readoutSm)
+                            .foregroundStyle(Theme.accent)
+                            .padding(10)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

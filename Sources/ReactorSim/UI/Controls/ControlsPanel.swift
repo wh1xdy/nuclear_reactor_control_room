@@ -213,6 +213,7 @@ struct ToggleButton: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .contentShape(Rectangle())   // whole tile is hittable, not just glyphs
         }
         .buttonStyle(.plain)
         .glassEffect(
@@ -251,6 +252,7 @@ struct ScramButton: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 64)
+            .contentShape(Rectangle())   // full button face is hittable
         }
         .buttonStyle(.plain)
         .glassEffect(
