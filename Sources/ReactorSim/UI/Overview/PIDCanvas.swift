@@ -68,9 +68,9 @@ struct PIDCanvas: View {
                    (rv.midX,  coldY),
                    (rv.midX,  rv.maxY)], cldColor, w: 4)
 
-        // Pressurizer surge line
+        // Pressurizer surge line — plain line work, not a color of its own
         pipe(ctx, [(pz.midX, pz.maxY),
-                   (rv.midX, rv.minY + fy(0.05))], Color(r: 140, g: 90, b: 210), w: 2)
+                   (rv.midX, rv.minY + fy(0.05))], Color.white.opacity(0.25), w: 1.5)
 
         // Main steam: SG right → horizontal run → TURB left
         pipe(ctx, [(sg.maxX, sg.minY + fy(0.10)),
@@ -110,79 +110,79 @@ struct PIDCanvas: View {
             }
         }
 
-        // ── Component boxes ───────────────────────────────────────────────────
+        // ── Component boxes — industrial line work ────────────────────────────
+        // Equipment is NEUTRAL: one fill, one hairline. Color belongs to the
+        // process (pipes) and to live alarm states only.
         let fuelAlarm  = snap.fuelTempK > 1200
         let pressAlarm = sup.pressureMPa > 17.0
 
-        // Reactor vessel — draw fuel glow then rods, label last
-        drawBox(ctx, rv, label: "", color: fuelAlarm ? Theme.alarm : Theme.border,
-                bg: fuelAlarm ? Color(r: 50, g: 8, b: 8) : Color(r: 14, g: 20, b: 34))
+        // Reactor vessel: rod-position indicators (drop from top with
+        // insertion) over a faint power tint — an instrument, not a lava lamp.
+        drawBox(ctx, rv, label: "", color: fuelAlarm ? Theme.alarm : nil)
         if frac > 0.01 {
-            let gh = (rv.height - fy(0.10)) * CGFloat(frac)
-            let gr = min(255, 60 + Int(180 * frac))
-            ctx.fill(Path(roundedRect: CGRect(x: rv.minX + fy(0.02),
-                                              y: rv.maxY - gh - fy(0.02),
-                                              width: rv.width - fy(0.04), height: gh),
-                          cornerRadius: 3),
-                     with: .color(Color(r: gr, g: Int(60*(1-frac)), b: 0).opacity(0.65)))
+            let core = CGRect(x: rv.minX + fy(0.025), y: rv.minY + fy(0.10),
+                              width: rv.width - fy(0.05), height: rv.height - fy(0.16))
+            ctx.fill(Path(roundedRect: core, cornerRadius: 3, style: .continuous),
+                     with: .color(Theme.hotLeg.opacity(0.05 + 0.10 * frac)))
         }
         for ci in 0..<4 {
-            let rx = rv.minX + rv.width * CGFloat(ci + 1) / 5.0 - fy(0.03)
-            let rodCol = frac > 0.05
-                ? Color(r: min(255, 60 + Int(160*frac)), g: 25, b: 8)
-                : Color(r: 35, g: 45, b: 65)
-            ctx.fill(Path(roundedRect: CGRect(x: rx, y: rv.minY + fy(0.10),
-                                              width: fy(0.05), height: rv.height - fy(0.16)),
-                          cornerRadius: 2), with: .color(rodCol))
+            let rx = rv.minX + rv.width * CGFloat(ci + 1) / 5.0 - fy(0.025)
+            let guide = CGRect(x: rx, y: rv.minY + fy(0.10),
+                               width: fy(0.05), height: rv.height - fy(0.16))
+            // Channel guide
+            ctx.stroke(Path(roundedRect: guide, cornerRadius: 2, style: .continuous),
+                       with: .color(.white.opacity(0.12)), lineWidth: 1)
+            // Rod inserted from the top, depth = actual rod position
+            let depth = guide.height * CGFloat(max(0, min(1, snap.rodPosition)))
+            if depth > 1 {
+                ctx.fill(Path(roundedRect: CGRect(x: guide.minX + 1.5, y: guide.minY,
+                                                  width: guide.width - 3, height: depth),
+                              cornerRadius: 1.5, style: .continuous),
+                         with: .color(.white.opacity(0.45)))
+            }
         }
-        // Reactor label on top, value below
-        drawLabel(ctx, "REACTOR", rect: rv, offsetY: fy(0.015),
-                  color: fuelAlarm ? Theme.alarm : Theme.textHdr, fontSize: 11)
-        drawLabel(ctx, snap.powerFraction.isSafe ? String(format: "%.1f %%", snap.powerFraction*100) : "---",
-                  rect: rv, offsetY: fy(0.13),
-                  color: snap.powerFraction > 1.1 ? Theme.alarm : Theme.normal, fontSize: 10)
-        drawLabel(ctx, snap.fuelTempK.isSafe ? String(format: "%.0f K", snap.fuelTempK) : "---",
-                  rect: rv, offsetY: fy(0.23),
-                  color: snap.fuelTempK > 1200 ? Theme.alarm : Theme.textDim, fontSize: 9)
+        drawLabel(ctx, snap.scrammed ? "REACTOR — TRIP" : "REACTOR", rect: rv, offsetY: fy(0.015),
+                  color: snap.scrammed ? Theme.alarm : (fuelAlarm ? Theme.alarm : Theme.textHdr),
+                  fontSize: 11)
+        drawAnnotation(ctx, pos: CGPoint(x: rv.maxX + 8, y: rv.maxY - fy(0.10)),
+                       text: snap.powerFraction.isSafe ? String(format: "%5.1f %%", snap.powerFraction*100) : "---",
+                       color: snap.powerFraction > 1.1 ? Theme.alarm : .white, fontSize: 10)
+        drawAnnotation(ctx, pos: CGPoint(x: rv.maxX + 8, y: rv.maxY - fy(0.04)),
+                       text: snap.fuelTempK.isSafe ? String(format: "%5.0f K", snap.fuelTempK) : "---",
+                       color: fuelAlarm ? Theme.alarm : Theme.textDim, fontSize: 9)
 
         // PZR
-        drawBox(ctx, pz, label: "PZR",
-                color: pressAlarm ? Theme.alarm : Color(r: 80, g: 60, b: 165),
-                bg: Color(r: 14, g: 12, b: 30))
+        drawBox(ctx, pz, label: "PZR", color: pressAlarm ? Theme.alarm : nil)
         drawAnnotation(ctx, pos: CGPoint(x: pz.maxX + 6, y: pz.midY - 6),
                        text: sup.pressureMPa.isSafe ? String(format: "%.2f MPa", sup.pressureMPa) : "---",
                        color: pressAlarm ? Theme.alarm : Theme.textDim, fontSize: 9)
 
-        // S/G with value
-        drawBox(ctx, sg, label: "S/G", color: Color(r: 55, g: 95, b: 185),
-                bg: Color(r: 10, g: 16, b: 34))
+        // S/G
+        drawBox(ctx, sg, label: "S/G", color: nil)
         drawLabel(ctx, snap.sgTempK.isSafe ? String(format: "%.0f K", snap.sgTempK) : "---",
-                  rect: sg, offsetY: fy(0.18),
-                  color: Theme.twophase, fontSize: 9)
+                  rect: sg, offsetY: fy(0.18), color: Theme.textDim, fontSize: 9)
 
         // RCP
-        drawBox(ctx, rcp, label: "RCP", color: Color(r: 65, g: 105, b: 185),
-                bg: Color(r: 10, g: 16, b: 34))
-        drawPump(ctx, center: CGPoint(x: rcp.midX, y: rcp.midY), r: min(rcp.width, rcp.height)*0.28,
-                 running: flow > 0.1, color: Color(r: 70, g: 120, b: 210))
+        drawBox(ctx, rcp, label: "RCP", color: nil)
+        drawPump(ctx, center: CGPoint(x: rcp.midX, y: rcp.midY),
+                 r: min(rcp.width, rcp.height) * 0.28, running: flow > 0.1)
 
-        // TURB
-        drawBox(ctx, tb, label: "TURB", color: Color(r: 55, g: 135, b: 75),
-                bg: Color(r: 10, g: 22, b: 14))
-        drawLabel(ctx, String(format: "%.0f %%", sup.turbineValve * 100),
-                  rect: tb, offsetY: fy(0.14), color: Theme.normal, fontSize: 9)
+        // TURB — tripped state is a real alarm; valve % is just a number
+        drawBox(ctx, tb, label: "TURB", color: sup.turbineTrip ? Theme.alarm : nil)
+        drawLabel(ctx, sup.turbineTrip ? "TRIPPED"
+                                       : String(format: "%.0f MWe", snap.electricPowerW / 1e6),
+                  rect: tb, offsetY: fy(0.14),
+                  color: sup.turbineTrip ? Theme.alarm : .white, fontSize: 9)
 
         // COND
-        drawBox(ctx, cd, label: "COND", color: Color(r: 45, g: 85, b: 115),
-                bg: Color(r: 8, g: 14, b: 22))
+        drawBox(ctx, cd, label: "COND", color: nil)
         drawLabel(ctx, sup.condTempK.isSafe ? String(format: "%.0f K", sup.condTempK) : "---",
                   rect: cd, offsetY: fy(0.12), color: Theme.textDim, fontSize: 9)
 
         // FW pump
         let fwPumpX = (cd.minX + sg.maxX) / 2
         drawPump(ctx, center: CGPoint(x: fwPumpX, y: fwY), r: H * 0.055,
-                 running: sup.feedwaterValve > 0.1 && !sup.feedwaterFault,
-                 color: Theme.water)
+                 running: sup.feedwaterValve > 0.1 && !sup.feedwaterFault)
     }
 
     // MARK: — Primitives
@@ -196,18 +196,17 @@ struct PIDCanvas: View {
         ctx.stroke(path, with: .color(color), lineWidth: w)
     }
 
+    // Neutral equipment body: one fill, one hairline. `color` overrides the
+    // outline ONLY for a live alarm state (red); nil = standard line work.
     private func drawBox(_ ctx: GraphicsContext, _ rect: CGRect,
-                         label: String, color: Color, bg: Color) {
-        ctx.fill(Path(roundedRect: rect, cornerRadius: 5), with: .color(bg))
-        // Top highlight
-        var hl = Path()
-        hl.move(to: CGPoint(x: rect.minX+5, y: rect.minY+1))
-        hl.addLine(to: CGPoint(x: rect.maxX-5, y: rect.minY+1))
-        ctx.stroke(hl, with: .color(.white.opacity(0.07)), lineWidth: 1)
-        ctx.stroke(Path(roundedRect: rect, cornerRadius: 5), with: .color(color), lineWidth: 1.5)
+                         label: String, color: Color?) {
+        let shape = Path(roundedRect: rect, cornerRadius: 6, style: .continuous)
+        ctx.fill(shape, with: .color(Color(r: 15, g: 17, b: 21)))
+        ctx.stroke(shape, with: .color(color ?? .white.opacity(0.22)),
+                   lineWidth: color == nil ? 1 : 1.5)
         if !label.isEmpty {
             ctx.draw(Text(label).font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Theme.textHdr),
+                        .foregroundColor(color ?? Theme.textHdr),
                      at: CGPoint(x: rect.midX, y: rect.minY + 8), anchor: .top)
         }
     }
@@ -226,24 +225,22 @@ struct PIDCanvas: View {
                  at: pos, anchor: .leading)
     }
 
+    // ISA-style pump symbol: circle + impeller triangle. Triangle fills accent
+    // when running, stays hollow grey when stopped. No orbiting decoration.
     private func drawPump(_ ctx: GraphicsContext, center: CGPoint, r: CGFloat,
-                          running: Bool, color: Color) {
-        let bg = running ? Color(r: 18, g: 28, b: 48) : Color(r: 12, g: 14, b: 18)
+                          running: Bool) {
         let rect = CGRect(x: center.x-r, y: center.y-r, width: r*2, height: r*2)
-        ctx.fill(Path(ellipseIn: rect), with: .color(bg))
-        ctx.stroke(Path(ellipseIn: rect), with: .color(color), lineWidth: 1.5)
-        var imp = Path()
-        imp.move(to: center)
-        imp.addLine(to: CGPoint(x: center.x + r*0.65, y: center.y - r*0.65))
-        ctx.stroke(imp, with: .color(color), lineWidth: 1.5)
+        ctx.fill(Path(ellipseIn: rect), with: .color(Color(r: 15, g: 17, b: 21)))
+        ctx.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.25)), lineWidth: 1)
+        var tri = Path()
+        tri.move(to: CGPoint(x: center.x - r*0.40, y: center.y - r*0.50))
+        tri.addLine(to: CGPoint(x: center.x - r*0.40, y: center.y + r*0.50))
+        tri.addLine(to: CGPoint(x: center.x + r*0.55, y: center.y))
+        tri.closeSubpath()
         if running {
-            for a in stride(from: 0.0, to: 360.0, by: 90.0) {
-                let rad = CGFloat(a) * .pi / 180
-                let dx = (r * 0.75) * cos(rad); let dy = -(r * 0.75) * sin(rad)
-                var dp = Path()
-                dp.addEllipse(in: CGRect(x: center.x+dx-2, y: center.y+dy-2, width: 4, height: 4))
-                ctx.fill(dp, with: .color(color.opacity(0.6)))
-            }
+            ctx.fill(tri, with: .color(Theme.accent.opacity(0.85)))
+        } else {
+            ctx.stroke(tri, with: .color(.white.opacity(0.30)), lineWidth: 1)
         }
     }
 }
