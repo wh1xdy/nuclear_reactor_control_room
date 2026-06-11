@@ -39,6 +39,7 @@ struct HeaderBar: View {
                             .foregroundStyle(timeSpeed > 1 ? Theme.accent : Theme.textDim)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: Capsule())
