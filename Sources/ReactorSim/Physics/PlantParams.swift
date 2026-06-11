@@ -39,6 +39,9 @@ struct PlantParams: Sendable {
     var rodWorth: Double        = -0.05       // Δk/k fully inserted
     var scramExtraWorth: Double = -0.12       // additional emergency boration+drop
     var rodDropTau: Double      = 2.0         // s — gravity drop time
+    // CRDM stepping speed [fraction of full travel per s].
+    // Realistic PWR: ~72 steps/min of a 228-step stroke ≈ 0.0053/s (~3 min full travel).
+    var rodSpeed: Double        = 0.0053
 
     // MARK: — Temperature feedback coefficients [Δk/k per K]
     var fuelTempCoeff: Double    = -2.0e-5    // Doppler, −2 pcm/K
@@ -57,7 +60,11 @@ struct PlantParams: Sendable {
     var nominalSGTemp: Double      = 490.0   // T_sg = T_cool − P/(h_CS) = 550−60 = 490
 
     // MARK: — Integration
-    var internalDt: Double = 0.01             // thermal/xenon substep [s]
+    // Thermal/xenon substep. Fastest thermal time constant is the coolant node
+    // (~0.7 s), so 0.05 s keeps explicit Euler 14× under its stability limit
+    // while making 600× time compression ~5× cheaper per frame. Kinetics has
+    // its own adaptive sub-stepping below this.
+    var internalDt: Double = 0.05
     var externalReactivity: Double = 0.0      // boron, instructor override
 
     // MARK: — Derived

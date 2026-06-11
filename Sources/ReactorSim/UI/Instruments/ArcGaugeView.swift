@@ -15,12 +15,12 @@ struct ArcGaugeView: View {
     private var statusColor: Color {
         if value > (hi * 0.9) { return Theme.alarm }
         if value > (hi * 0.75) { return Theme.caution }
-        return Theme.normal
+        return .white            // normal range: neutral, not ISA green
     }
 
     var body: some View {
         GeometryReader { geo in
-            let r = min(geo.size.width, geo.size.height) / 2 - 4
+            let r = min(geo.size.width, geo.size.height) / 2 - 18   // room for tick labels
             let cx = geo.size.width / 2
             let cy = geo.size.height / 2
             Canvas { ctx, _ in
@@ -37,27 +37,57 @@ struct ArcGaugeView: View {
         let rOuter = r
         let rInner = r * 0.68
 
-        // Background arc (dark colored zones)
+        // Background arc — neutral track (no decorative color zones)
         for i in 0..<nSegs {
             let a0 = Angle.degrees(startDeg - Double(i)   * sweepDeg / Double(nSegs))
             let a1 = Angle.degrees(startDeg - Double(i+1) * sweepDeg / Double(nSegs))
-            let sf = Double(i) / Double(nSegs)
-            let bgColor: Color = sf < 0.67 ? Color(r: 20, g: 50, b: 22) :
-                                 sf < 0.85 ? Color(r: 50, g: 48, b: 10) :
-                                             Color(r: 55, g: 16, b: 10)
             ctx.fill(arcSegPath(cx: cx, cy: cy, rO: rOuter, rI: rInner, a0: a0, a1: a1),
-                     with: .color(bgColor))
+                     with: .color(.white.opacity(0.07)))
         }
 
-        // Filled arc up to current value
+        // Filled arc up to current value — accent normally; amber/red only in the
+        // caution/trip bands themselves (live abnormal indication).
         let nFill = max(1, Int(fraction * Double(nSegs)))
         for i in 0..<nFill {
             let a0 = Angle.degrees(startDeg - Double(i)   * sweepDeg / Double(nSegs))
             let a1 = Angle.degrees(startDeg - Double(i+1) * sweepDeg / Double(nSegs))
             let sf = Double(i) / Double(nSegs)
-            let fillColor: Color = sf < 0.67 ? Theme.normal : sf < 0.85 ? Theme.caution : Theme.alarm
+            let fillColor: Color = sf < 0.85 ? Theme.accent : Theme.alarm
             ctx.fill(arcSegPath(cx: cx, cy: cy, rO: rOuter, rI: rInner, a0: a0, a1: a1),
-                     with: .color(fillColor))
+                     with: .color(fillColor.opacity(0.85)))
+        }
+
+        // Calibrated scale: 5 major numbered ticks + minors (a gauge without a
+        // scale is a battery indicator, not an instrument)
+        let tickFmt: String = {
+            let step = (hi - lo) / 4
+            return abs(step - step.rounded()) < 0.01 ? "%.0f" : "%.1f"
+        }()
+        for i in 0...4 {
+            let f = Double(i) / 4
+            let a = Angle.degrees(startDeg - f * sweepDeg)
+            let x0 = cx + (rOuter + 2) * cos(a.radians)
+            let y0 = cy - (rOuter + 2) * sin(a.radians)
+            let x1 = cx + (rOuter + 7) * cos(a.radians)
+            let y1 = cy - (rOuter + 7) * sin(a.radians)
+            var p = Path(); p.move(to: .init(x: x0, y: y0)); p.addLine(to: .init(x: x1, y: y1))
+            ctx.stroke(p, with: .color(.white.opacity(0.35)), lineWidth: 1)
+            let lx = cx + (rOuter + 14) * cos(a.radians)
+            let ly = cy - (rOuter + 14) * sin(a.radians)
+            ctx.draw(
+                Text(String(format: tickFmt, lo + (hi - lo) * f))
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundColor(Theme.textDim),
+                at: .init(x: lx, y: ly), anchor: .center)
+        }
+        for i in 0..<20 where i % 5 != 0 {
+            let a = Angle.degrees(startDeg - Double(i) / 20 * sweepDeg)
+            let x0 = cx + (rOuter + 2) * cos(a.radians)
+            let y0 = cy - (rOuter + 2) * sin(a.radians)
+            let x1 = cx + (rOuter + 5) * cos(a.radians)
+            let y1 = cy - (rOuter + 5) * sin(a.radians)
+            var p = Path(); p.move(to: .init(x: x0, y: y0)); p.addLine(to: .init(x: x1, y: y1))
+            ctx.stroke(p, with: .color(.white.opacity(0.15)), lineWidth: 0.5)
         }
 
         // Trip line

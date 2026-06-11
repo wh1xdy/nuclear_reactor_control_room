@@ -6,49 +6,48 @@ struct PrimaryTab: View {
     let supervisor: PlantSupervisor
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             // Left: large bar meters
             VStack(spacing: 0) {
                 PanelHeader(title: "PRIMARY SYSTEM — INSTRUMENTATION")
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: 14) {
                     ForEach(barDefs, id: \.label) { def in
                         BarMeterView(value: def.value, lo: def.lo, hi: def.hi,
                                      label: def.label, unit: def.unit,
-                                     tripHi: def.tripHi, tripLo: def.tripLo)
+                                     tripHi: def.tripHi, tripLo: def.tripLo,
+                                     warnHi: def.warnHi, warnLo: def.warnLo)
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(16)
+                .padding(20)
                 .frame(maxHeight: .infinity)
             }
-            .background(Theme.panel)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-            .overlay(CornerBrackets())
+            .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
             .frame(maxWidth: .infinity)
 
             // Right: DCS readout grid + status
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 DCSGrid(supervisor: supervisor)
                 RCPPanel(supervisor: supervisor)
                 PressPanel(supervisor: supervisor)
             }
             .frame(width: 320)
         }
-        .padding(8)
+        .padding(12)
     }
 
     private var barDefs: [(label: String, unit: String, value: Double,
-                          lo: Double, hi: Double, tripHi: Double?, tripLo: Double?)] {
+                          lo: Double, hi: Double, tripHi: Double?, tripLo: Double?,
+                          warnHi: Double?, warnLo: Double?)] {
         let s = supervisor.snapshot
-        let nomP: Double = 15.5
+        // Warn/trip markers match the protection setpoints in updateAlarms()
         return [
-            ("PRESSURE",  "MPa", supervisor.pressureMPa, 0, 18, nomP * 1.08, nil),
-            ("FUEL T",    "K",   s.fuelTempK,   300, 1800, 1400, nil),
-            ("COOLANT T", "K",   s.coolantTempK, 300, 700, 616, nil),
-            ("RCP SPEED", "%",   supervisor.omegaRCP * 100, 0, 110, nil, 87),
-            ("POWER",     "%",   s.powerFraction * 100, 0, 130, 120, nil),
-            ("REACTIVITY","pcm", s.reactivity * 1e5, -500, 500, nil, nil),
+            ("PZR PRESS", "MPa", supervisor.pressureMPa, 0, 18, 17.0, nil, 16.3, nil),
+            ("T-FUEL",    "K",   s.fuelTempK,   300, 1800, 1500, nil, 1400, nil),
+            ("RCS T-AVG", "K",   s.coolantTempK, 300, 700, 620, nil, 610, nil),
+            ("RCP SPEED", "%",   supervisor.omegaRCP * 100, 0, 110, nil, nil, nil, 87),
+            ("RX POWER",  "%",   s.powerFraction * 100, 0, 130, 120, nil, 115, nil),
+            ("REACTIVITY","pcm", s.reactivity * 1e5, -500, 500, nil, nil, nil, nil),
         ]
     }
 }
@@ -67,24 +66,22 @@ private struct DCSGrid: View {
             }
             .padding(8)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
     }
 
     private func readouts(s: PlantSnapshot, nomP: Double) -> [(String, String, Color)] {[
-        ("Core power",    String(format: "%.2f %%",     s.powerFraction * 100),   .powerStatus(s.powerFraction)),
-        ("Thermal power", String(format: "%.1f MWt",   s.thermalPowerW / 1e6),   Theme.text),
-        ("Pressure",      String(format: "%.3f MPa",   supervisor.pressureMPa),
-            supervisor.pressureMPa > nomP * 1.08 ? Theme.alarm : supervisor.pressureMPa > nomP * 1.04 ? Theme.caution : Theme.normal),
-        ("Fuel temp",     String(format: "%.1f K",     s.fuelTempK),
-            s.fuelTempK > 1400 ? Theme.alarm : s.fuelTempK > 1200 ? Theme.caution : Theme.normal),
-        ("Coolant temp",  String(format: "%.1f K",     s.coolantTempK),
-            s.coolantTempK > 616 ? Theme.alarm : Theme.normal),
-        ("Reactivity",    String(format: "%+.5f",      s.reactivity),             .reactivityStatus(s.reactivity)),
-        ("Xenon worth",   String(format: "%+.0f pcm",  s.reactivity * 1e5),       Theme.textDim),
-        ("Boron",         String(format: "%.1f ppm",   supervisor.boronPPM),
+        ("RX POWER",    String(format: "%6.2f %%",    s.powerFraction * 100),   .powerStatus(s.powerFraction)),
+        ("THERMAL PWR", String(format: "%6.1f MWt",   s.thermalPowerW / 1e6),   Theme.text),
+        ("PZR PRESS",   String(format: "%6.3f MPa",   supervisor.pressureMPa),
+            supervisor.pressureMPa > 17.0 ? Theme.alarm : supervisor.pressureMPa > 16.3 ? Theme.caution : Theme.text),
+        ("T-FUEL AVG",  String(format: "%6.1f K",     s.fuelTempK),
+            s.fuelTempK > 1500 ? Theme.alarm : s.fuelTempK > 1200 ? Theme.caution : Theme.text),
+        ("RCS T-AVG",   String(format: "%6.1f K",     s.coolantTempK),
+            s.coolantTempK > 620 ? Theme.alarm : Theme.text),
+        ("REACTIVITY",  String(format: "%+6.0f pcm",  s.reactivity * 1e5),       .reactivityStatus(s.reactivity)),
+        // Xenon worth = −coeff·X (the old row mistakenly showed TOTAL reactivity)
+        ("XENON WORTH", String(format: "%+6.0f pcm",  s.xenonInventory * -1.6e-5 * 1e5), Theme.textDim),
+        ("RCS BORON",   String(format: "%6.1f ppm",   supervisor.boronPPM),
             supervisor.boronPPM < 100 ? Theme.caution : Theme.text),
     ]}
 }
@@ -93,24 +90,21 @@ private struct RCPPanel: View {
     let supervisor: PlantSupervisor
     var body: some View {
         HStack(spacing: 12) {
-            VStack(spacing: 4) {
-                LEDIndicator(label: "RCP RUN", on: supervisor.omegaRCP > 0.9, color: Theme.normal)
+            VStack(spacing: 6) {
+                LEDIndicator(label: "RCP RUN", on: supervisor.omegaRCP > 0.9, color: Theme.accent)
                 LEDIndicator(label: "PORV",    on: supervisor.porvOpen,        color: Theme.caution)
                 LEDIndicator(label: "ECCS",    on: supervisor.eccsActuated,    color: Theme.alarm)
             }
-            VStack(alignment: .leading, spacing: 4) {
-                readoutRow("RCP speed", String(format: "%.1f %%", supervisor.omegaRCP * 100),
-                           supervisor.omegaRCP < 0.87 ? Theme.caution : Theme.normal)
-                readoutRow("Flow", String(format: "%.1f %%", supervisor.primaryFlow * supervisor.omegaRCP * 100), Theme.text)
-                readoutRow("FW inv.", String(format: "%.3f", supervisor.feedwaterInv),
+            VStack(alignment: .leading, spacing: 6) {
+                readoutRow("RCP SPEED", String(format: "%5.1f %%", supervisor.omegaRCP * 100),
+                           supervisor.omegaRCP < 0.87 ? Theme.caution : Theme.text)
+                readoutRow("RCS FLOW", String(format: "%5.1f %%", supervisor.primaryFlow * supervisor.omegaRCP * 100), Theme.text)
+                readoutRow("FW INV", String(format: "%5.3f", supervisor.feedwaterInv),
                            supervisor.feedwaterInv < 0.1 ? Theme.alarm : Theme.text)
             }
         }
         .padding(10)
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
         .frame(maxWidth: .infinity)
     }
     private func readoutRow(_ l: String, _ v: String, _ c: Color) -> some View {
@@ -128,14 +122,11 @@ private struct PressPanel: View {
         VStack(spacing: 0) {
             PanelHeader(title: "PRESSURIZER")
             TrendView(values: supervisor.orderedHistory(supervisor.histPress),
-                      yLo: 13, yHi: 17, color: Theme.accent, label: "Pressure (MPa)")
+                      yLo: 13, yHi: 17, color: Theme.accent, label: "PZR PRESS MPa")
                 .padding(8)
                 .frame(height: 120)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
     }
 }
 
@@ -150,10 +141,9 @@ struct DCSReadout: View {
             Text(label).font(.system(size: 9, design: .monospaced)).foregroundStyle(Theme.textDim)
             Text(value).font(Theme.readoutSm).foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.7)
         }
-        .padding(6)
+        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(r: 8, g: 10, b: 14), in: RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.border, lineWidth: 0.5))
+        .glassEffect(.clear, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 }
 

@@ -6,48 +6,45 @@ struct SecondaryTab: View {
     let supervisor: PlantSupervisor
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             // Bar meters
             VStack(spacing: 0) {
                 PanelHeader(title: "SECONDARY SYSTEM — INSTRUMENTATION")
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: 14) {
                     ForEach(barDefs, id: \.label) { def in
                         BarMeterView(value: def.value, lo: def.lo, hi: def.hi,
                                      label: def.label, unit: def.unit,
-                                     tripHi: def.tripHi)
+                                     tripHi: def.tripHi, warnHi: def.warnHi)
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(16)
+                .padding(20)
                 .frame(maxHeight: .infinity)
             }
-            .background(Theme.panel)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-            .overlay(CornerBrackets())
+            .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
             .frame(maxWidth: .infinity)
 
             // Right: DCS boxes + electric output
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 SecondaryDCSGrid(supervisor: supervisor)
                 ElectricOutputPanel(supervisor: supervisor)
                 SecondaryTrends(supervisor: supervisor)
             }
             .frame(width: 320)
         }
-        .padding(8)
+        .padding(12)
     }
 
     private var barDefs: [(label: String, unit: String, value: Double,
-                          lo: Double, hi: Double, tripHi: Double?)] {
+                          lo: Double, hi: Double, tripHi: Double?, warnHi: Double?)] {
         let s = supervisor.snapshot
         return [
-            ("SG TEMP",    "K",   s.sgTempK,           300, 700, 620),
-            ("COND TEMP",  "K",   supervisor.condTempK, 280, 380, 340),
-            ("STEAM INV",  "",    supervisor.steamInv,  0,   2.0, nil),
-            ("FW INV",     "",    supervisor.feedwaterInv, 0, 1.2, nil),
-            ("ELEC PWR",   "MWe", s.electricPowerW / 1e6, 0, 1200, nil),
-            ("TURB VALVE", "%",   supervisor.turbineValve * 100, 0, 105, nil),
+            ("SG TEMP",    "K",   s.sgTempK,           300, 700, 620, 600),
+            ("COND TEMP",  "K",   supervisor.condTempK, 280, 380, 340, 330),
+            ("STEAM INV",  "rel", supervisor.steamInv,  0,   2.0, nil, nil),
+            ("FW INV",     "rel", supervisor.feedwaterInv, 0, 1.2, nil, nil),
+            ("GROSS ELEC", "MWe", s.electricPowerW / 1e6, 0, 1200, nil, nil),
+            ("TBN GOV",    "%",   supervisor.turbineValve * 100, 0, 105, nil, nil),
         ]
     }
 }
@@ -59,26 +56,27 @@ private struct SecondaryDCSGrid: View {
         VStack(spacing: 0) {
             PanelHeader(title: "SECONDARY PARAMETERS")
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                DCSReadout(label: "Thermal power",  value: String(format: "%.1f MWt", s.thermalPowerW / 1e6), color: Theme.text)
-                DCSReadout(label: "Electric power", value: String(format: "%.1f MWe", s.electricPowerW / 1e6), color: Theme.normal)
-                DCSReadout(label: "SG temp",        value: String(format: "%.1f K", s.sgTempK),
+                DCSReadout(label: "THERMAL PWR",  value: String(format: "%6.1f MWt", s.thermalPowerW / 1e6), color: Theme.text)
+                DCSReadout(label: "GROSS ELEC",   value: String(format: "%6.1f MWe", s.electricPowerW / 1e6), color: Theme.text)
+                DCSReadout(label: "SG TEMP",      value: String(format: "%6.1f K", s.sgTempK),
                            color: s.sgTempK > 600 ? Theme.caution : Theme.text)
-                DCSReadout(label: "Condenser",      value: String(format: "%.1f K", supervisor.condTempK),
+                DCSReadout(label: "COND TEMP",    value: String(format: "%6.1f K", supervisor.condTempK),
                            color: supervisor.condTempK > 330 ? Theme.caution : Theme.text)
-                DCSReadout(label: "Steam inv.",     value: String(format: "%.3f", supervisor.steamInv),
+                DCSReadout(label: "STEAM INV",    value: String(format: "%6.3f", supervisor.steamInv),
                            color: supervisor.steamInv < 0.3 ? Theme.alarm : Theme.text)
-                DCSReadout(label: "FW inv.",        value: String(format: "%.3f", supervisor.feedwaterInv),
+                DCSReadout(label: "FW INV",       value: String(format: "%6.3f", supervisor.feedwaterInv),
                            color: supervisor.feedwaterInv < 0.1 ? Theme.alarm : Theme.text)
-                DCSReadout(label: "Turbine valve",  value: String(format: "%.0f %%", supervisor.turbineValve * 100), color: Theme.text)
-                DCSReadout(label: "Decay heat",     value: String(format: "%.2f %%", s.decayHeatFraction * 100),
+                DCSReadout(label: "TBN GOV VLV",  value: String(format: "%6.1f %%", supervisor.turbineValve * 100), color: Theme.text)
+                DCSReadout(label: "STEAM DUMP",   value: String(format: "%6.1f %%", supervisor.steamDumpValve * 100),
+                           color: supervisor.steamDumpValve > 0 ? Theme.caution : Theme.text)
+                DCSReadout(label: "DECAY HEAT",   value: String(format: "%6.2f %%", s.decayHeatFraction * 100),
                            color: s.decayHeatFraction > 0.03 ? Theme.caution : Theme.text)
+                DCSReadout(label: "TBN STATUS",   value: supervisor.turbineTrip ? "TRIPPED" : "ON LINE",
+                           color: supervisor.turbineTrip ? Theme.alarm : Theme.text)
             }
-            .padding(8)
+            .padding(10)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
     }
 }
 
@@ -94,24 +92,23 @@ private struct ElectricOutputPanel: View {
                 VStack(spacing: 2) {
                     Text(String(format: "%.1f", s.electricPowerW / 1e6))
                         .font(Theme.readoutXl)
-                        .foregroundStyle(Theme.normal)
+                        .foregroundStyle(.white)
                     Text("MWe")
                         .font(Theme.readoutSm)
                         .foregroundStyle(Theme.textDim)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    readoutRow("Thermal",    String(format: "%.1f MWt", s.thermalPowerW / 1e6), Theme.text)
-                    readoutRow("Efficiency", String(format: "%.1f %%",  efficiency), Theme.text)
-                    readoutRow("Trip",       supervisor.turbineTrip ? "TRIPPED" : "NORMAL",
-                               supervisor.turbineTrip ? Theme.alarm : Theme.normal)
+                VStack(alignment: .leading, spacing: 6) {
+                    readoutRow("THERMAL",    String(format: "%6.1f MWt", s.thermalPowerW / 1e6), Theme.text)
+                    readoutRow("EFFICIENCY", String(format: "%6.1f %%",  efficiency), Theme.text)
+                    readoutRow("STM DUMP",   String(format: "%6.1f %%",  supervisor.steamDumpValve * 100),
+                               supervisor.steamDumpValve > 0 ? Theme.caution : Theme.text)
+                    readoutRow("BREAKER",    supervisor.turbineTrip ? "OPEN" : "CLOSED",
+                               supervisor.turbineTrip ? Theme.alarm : Theme.text)
                 }
             }
-            .padding(12)
+            .padding(Theme.panelPadding)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
     }
     private func readoutRow(_ l: String, _ v: String, _ c: Color) -> some View {
         HStack { Text(l).font(Theme.readoutSm).foregroundStyle(Theme.textDim); Spacer()
@@ -124,20 +121,17 @@ private struct SecondaryTrends: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: "SECONDARY TRENDS")
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 TrendView(values: supervisor.orderedHistory(supervisor.histElec),
-                          yLo: 0, yHi: 1100, color: Theme.normal, label: "Electric power (MWe)")
+                          yLo: 0, yHi: 1100, color: Theme.accent, label: "GROSS ELEC MWe")
                 TrendView(values: supervisor.orderedHistory(supervisor.histSteamT),
-                          yLo: 400, yHi: 650, color: Theme.twophase, label: "SG temperature (K)")
+                          yLo: 400, yHi: 650, color: Theme.accent, label: "SG TEMP K")
                 TrendView(values: supervisor.orderedHistory(supervisor.histDecay),
-                          yLo: 0, yHi: 10, color: Theme.caution, label: "Decay heat (%)")
+                          yLo: 0, yHi: 10, color: Theme.accent, label: "DECAY HEAT %")
             }
-            .padding(8)
+            .padding(12)
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
-        .overlay(CornerBrackets())
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
         .frame(maxHeight: .infinity)
     }
 }

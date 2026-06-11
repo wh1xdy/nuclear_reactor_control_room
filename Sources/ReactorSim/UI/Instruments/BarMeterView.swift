@@ -1,4 +1,6 @@
-// BarMeterView.swift — Vertical bar meter with ISA color bands + trip lines.
+// BarMeterView.swift — Vertical bar meter with a calibrated tick scale and
+// setpoint markers. ISA colors appear only when the value is in an abnormal
+// band; the normal-range fill is the accent.
 
 import SwiftUI
 
@@ -10,68 +12,120 @@ struct BarMeterView: View {
     let unit: String
     var tripHi: Double? = nil
     var tripLo: Double? = nil
+    var warnHi: Double? = nil
+    var warnLo: Double? = nil
 
     private var fraction: Double { max(0, min(1, (value - lo) / max(1e-9, hi - lo))) }
 
+    // Color comes from REAL setpoints only — never from "% of scale", which
+    // painted normal operating points amber (PZR at 15.6/18, RCP at 100/110).
     private var fillColor: Color {
         if let t = tripHi, value > t { return Theme.alarm }
-        if value > hi * 0.85         { return Theme.caution }
-        return Theme.normal
+        if let t = tripLo, value < t { return Theme.alarm }
+        if let w = warnHi, value > w { return Theme.caution }
+        if let w = warnLo, value < w { return Theme.caution }
+        return Theme.accent
+    }
+
+    // Fixed decimals chosen from the SCALE, not the value — readouts never
+    // jitter between widths.
+    private var decimals: Int {
+        let span = hi - lo
+        if span >= 50 { return 1 }
+        if span >= 5  { return 2 }
+        return 3
+    }
+
+    private var tickFormat: String {
+        let step = (hi - lo) / 4
+        return abs(step - step.rounded()) < 0.01 ? "%.0f" : "%.1f"
     }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 5) {
             Text(label)
-                .font(.system(size: 9, design: .monospaced))
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundStyle(Theme.textDim)
+                .tracking(0.5)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            GeometryReader { geo in
-                ZStack(alignment: .bottom) {
-                    // Bezel
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color(r: 8, g: 11, b: 18))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.border, lineWidth: 1))
+            Canvas { ctx, size in
+                let w = size.width
+                let barW: CGFloat = min(16, max(10, w * 0.30))
+                let barX = w - barW - 6              // room for setpoint flags
+                let yTop: CGFloat = 4
+                let yBot = size.height - 4
+                let span = yBot - yTop
 
-                    // Fill bar
-                    let barH = max(0, (geo.size.height - 4) * CGFloat(fraction))
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(fillColor)
-                        .frame(width: geo.size.width - 4, height: barH)
-                        .padding(.bottom, 2)
-                        .overlay(alignment: .top) {
-                            // Bright top edge
-                            fillColor.opacity(0.6)
-                                .frame(height: 1)
-                                .offset(y: -barH + 1)
-                        }
-
-                    // Trip lines
-                    if let t = tripHi {
-                        let ty = geo.size.height - (geo.size.height - 4) * CGFloat((t - lo) / max(1e-9, hi - lo)) - 2
-                        Rectangle()
-                            .fill(Theme.alarm)
-                            .frame(height: 1.5)
-                            .offset(y: ty - geo.size.height / 2)
-                    }
+                func yFor(_ v: Double) -> CGFloat {
+                    let f = max(0, min(1, (v - lo) / max(1e-9, hi - lo)))
+                    return yBot - span * CGFloat(f)
                 }
+
+                // Track
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: barX, y: yTop, width: barW, height: span),
+                         cornerRadius: 5, style: .continuous),
+                    with: .color(.white.opacity(0.06)))
+
+                // Calibrated scale: 5 major ticks with values, minor ticks between
+                for i in 0...4 {
+                    let v = lo + (hi - lo) * Double(i) / 4
+                    let y = yFor(v)
+                    var p = Path()
+                    p.move(to: .init(x: barX - 8, y: y)); p.addLine(to: .init(x: barX - 2, y: y))
+                    ctx.stroke(p, with: .color(.white.opacity(0.35)), lineWidth: 1)
+                    ctx.draw(
+                        Text(String(format: tickFormat, v))
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(Theme.textDim),
+                        at: .init(x: barX - 11, y: y), anchor: .trailing)
+                }
+                for i in 0..<20 where i % 5 != 0 {
+                    let y = yFor(lo + (hi - lo) * Double(i) / 20)
+                    var p = Path()
+                    p.move(to: .init(x: barX - 5, y: y)); p.addLine(to: .init(x: barX - 2, y: y))
+                    ctx.stroke(p, with: .color(.white.opacity(0.15)), lineWidth: 0.5)
+                }
+
+                // Fill bar
+                let fh = span * CGFloat(fraction)
+                if fh > 0.5 {
+                    ctx.fill(
+                        Path(roundedRect: CGRect(x: barX + 2, y: yBot - fh, width: barW - 4, height: fh),
+                             cornerRadius: 3, style: .continuous),
+                        with: .color(fillColor.opacity(0.85)))
+                }
+
+                // Setpoint markers: line across the bar + pointer flag at right
+                func setpoint(_ v: Double, _ color: Color) {
+                    guard v > lo, v < hi else { return }
+                    let y = yFor(v)
+                    var p = Path()
+                    p.move(to: .init(x: barX, y: y)); p.addLine(to: .init(x: barX + barW, y: y))
+                    ctx.stroke(p, with: .color(color), lineWidth: 1.2)
+                    var tri = Path()
+                    tri.move(to: .init(x: barX + barW + 6, y: y - 3.5))
+                    tri.addLine(to: .init(x: barX + barW + 6, y: y + 3.5))
+                    tri.addLine(to: .init(x: barX + barW + 1, y: y))
+                    tri.closeSubpath()
+                    ctx.fill(tri, with: .color(color))
+                }
+                if let w = warnHi { setpoint(w, Theme.caution) }
+                if let w = warnLo { setpoint(w, Theme.caution) }
+                if let t = tripHi { setpoint(t, Theme.alarm) }
+                if let t = tripLo { setpoint(t, Theme.alarm) }
             }
             .frame(maxWidth: .infinity)
 
-            // Numeric readout
-            Text(formattedValue)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(fillColor)
-            if !unit.isEmpty {
-                Text(unit)
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundStyle(Theme.textDim)
-            }
+            // Numeric readout — fixed decimals from scale span
+            Text(String(format: "%.\(decimals)f", value))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(fillColor == Theme.accent ? .white : fillColor)
+            Text(unit.isEmpty ? "—" : unit)
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundStyle(Theme.textDim)
         }
-    }
-
-    private var formattedValue: String {
-        abs(value) < 1000 ? String(format: "%.1f", value) : String(format: "%.0f", value)
     }
 }

@@ -14,35 +14,32 @@ struct AlarmsTab: View {
                 VStack {
                     Spacer()
                     HStack(spacing: 12) {
-                        Circle().fill(Theme.normal).frame(width: 10, height: 10)
-                            .shadow(color: Theme.normal.opacity(0.8), radius: 6)
+                        // Quiet board = quiet colors — no green on normal state.
+                        Circle().fill(Color.white.opacity(0.35)).frame(width: 8, height: 8)
                         Text("All systems nominal")
                             .font(Theme.readoutMd)
-                            .foregroundStyle(Theme.normal)
+                            .foregroundStyle(Theme.textDim)
                     }
                     Spacer()
                 }
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 300))], spacing: 6) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 300))], spacing: 10) {
                     ForEach(supervisor.alarms) { alarm in
                         AlarmTile(alarm: alarm, blink: blink)
                     }
                 }
-                .padding(10)
-
-                Divider().background(Theme.sep)
+                .padding(Theme.panelPadding)
 
                 Button("ACKNOWLEDGE ALL [C]") { supervisor.acknowledgeAllAlarms() }
                     .font(Theme.readoutSm)
-                    .foregroundStyle(Theme.textDim)
+                    .foregroundStyle(Theme.accent)
                     .buttonStyle(.plain)
-                    .padding(8)
+                    .padding(12)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.panel)
-        .overlay(CornerBrackets())
-        .padding(8)
+        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .padding(12)
         .onReceive(timer) { _ in blink.toggle() }
     }
 }
@@ -74,7 +71,8 @@ private struct AlarmTile: View {
                         .font(Theme.readoutSm)
                         .foregroundStyle(Theme.caution)
                         .padding(.horizontal, 4)
-                        .background(Theme.caution.opacity(0.2), in: RoundedRectangle(cornerRadius: 2))
+                        .background(Theme.caution.opacity(0.2),
+                                    in: .rect(cornerRadius: 4, style: .continuous))
                 }
                 Spacer()
                 Text(String(format: "T+%.0fs", alarm.simTime))
@@ -87,8 +85,8 @@ private struct AlarmTile: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
         }
-        .padding(8)
-        .background(bg, in: RoundedRectangle(cornerRadius: 5))
-        .overlay(RoundedRectangle(cornerRadius: 5).stroke(borderColor, lineWidth: 1))
+        .padding(10)
+        // Live alarm tile — ISA color fill carries the state; no hard border.
+        .background(bg, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 }

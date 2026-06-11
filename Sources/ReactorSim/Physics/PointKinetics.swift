@@ -15,6 +15,8 @@ final class PointKinetics {
     private var Cmid: [Double]
     private var dC1:  [Double]
     private var dC2:  [Double]
+    private let bL:   [Double]   // β_i / Λ — constant, precomputed once
+    private let maxLam: Double   // fastest precursor group decay constant
 
     init(_ params: PlantParams) {
         self.params = params
@@ -25,33 +27,53 @@ final class PointKinetics {
         Cmid = [Double](repeating: 0, count: n6)
         dC1  = [Double](repeating: 0, count: n6)
         dC2  = [Double](repeating: 0, count: n6)
+        bL   = params.beta.map { $0 / params.lambdaPrompt }
+        maxLam = params.lambdaD.max() ?? 3.01
     }
 
     func step(dt: Double, rho: Double) {
         guard dt > 0 else { return }
         let p    = params
         let lam  = p.lambdaD
-        let bet  = p.beta
         let Lam  = p.lambdaPrompt
         let bT   = p.betaTotal
         let rbl  = (rho - bT) / Lam      // (ρ − β) / Λ — loop invariant
-        let iLam = 1.0 / Lam
 
-        // β_i / Λ — precomputed per-group
-        let bL = bet.map { $0 * iLam }
-
-        // Adaptive sub-stepping: dt_safe = 0.3 · n / |dn/dt|
-        let nSafe = max(n, 1e-6)
-        let ps    = (0..<6).reduce(0.0) { $0 + lam[$1] * C[$1] }
-        let dm    = abs(rbl * nSafe) + abs(ps)
-        let nSub: Int
-        if n < 1e-4 {
-            nSub = 1
-        } else {
-            let dtSafe = 0.3 * nSafe / max(dm, 1e-10)
-            // Divide by min(dt, dtSafe) — when dtSafe < dt we need MORE sub-steps, not fewer
-            nSub = min(200, max(1, Int(ceil(dt / min(dt, dtSafe)))))
+        // Deep-shutdown fast path: prompt-jump approximation.
+        // With |ρ−β|/Λ ≈ 9000/s the prompt term is ultra-stiff, but n is then
+        // slaved to the precursor source (n ≈ Σλ_iC_i · Λ/(β−ρ)) on a µs
+        // timescale. Integrating it explicitly costs ~900 substeps per call;
+        // the quasi-static solution is exact to O(µs) and O(1) per step.
+        if rbl < 0, n < 1e-3, -rbl * dt > 20 {
+            let nQS    = max(1, Int(ceil(dt * maxLam / 0.3)))
+            let qsDt   = dt / Double(nQS)
+            for _ in 0..<nQS {
+                let src = (0..<6).reduce(0.0) { $0 + lam[$1] * C[$1] }
+                n = src / -rbl
+                for i in 0..<6 {
+                    let e = exp(-lam[i] * qsDt)
+                    C[i] = C[i] * e + bL[i] * n / lam[i] * (1.0 - e)
+                }
+            }
+            return
         }
+
+        // Adaptive sub-stepping.
+        // dtStab: RK2 stability bound for the stiff prompt term — |rbl|·subDt
+        // must stay ≲ 0.5 or a deep-scram step (rbl ≈ −9000/s) diverges to NaN.
+        // dtSafe: accuracy bound, 30% change in n per substep.
+        let nSafe  = max(n, 1e-6)
+        let ps     = (0..<6).reduce(0.0) { $0 + lam[$1] * C[$1] }
+        let dm     = abs(rbl * nSafe) + abs(ps)
+        let dtStab = 0.5 / max(abs(rbl), 1e-10)
+        let dtSafe: Double
+        if n < 1e-4 {
+            dtSafe = dtStab                       // power negligible: stability only
+        } else {
+            dtSafe = min(0.3 * nSafe / max(dm, 1e-10), dtStab)
+        }
+        // Divide by min(dt, dtSafe) — when dtSafe < dt we need MORE sub-steps, not fewer
+        let nSub  = min(5000, max(1, Int(ceil(dt / min(dt, dtSafe)))))
         let subDt = dt / Double(nSub)
         let hdt   = 0.5 * subDt
 
@@ -70,8 +92,8 @@ final class PointKinetics {
             for i in 0..<6 { dC2[i] = bL[i] * nMid - lam[i] * Cmid[i] }
             n += subDt * dn2
             for i in 0..<6 { C[i] += subDt * dC2[i] }
+            if n < 0 { n = 0 }   // clamp inside the loop — a negative excursion
+                                 // must not feed the next substep
         }
-
-        if n < 0 { n = 0 }
     }
 }

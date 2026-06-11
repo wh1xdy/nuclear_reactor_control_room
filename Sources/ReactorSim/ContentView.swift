@@ -33,28 +33,22 @@ struct ContentView: View {
     // MARK: — Layout (read-only from supervisor)
 
     private var layout: some View {
-        GeometryReader { _ in
-            ZStack {
-                GridBackground()
-                VStack(spacing: 0) {
-                    HeaderBar(supervisor: supervisor, timeSpeed: timeSpeed,
-                              onSpeedCycle: cycleSpeed)
-                        .frame(height: Theme.headerHeight)
+        VStack(spacing: 0) {
+            HeaderBar(supervisor: supervisor, timeSpeed: timeSpeed,
+                      onSpeedCycle: cycleSpeed)
+                .frame(height: Theme.headerHeight)
 
-                    TabBar(activeTab: $activeTab)
-                        .frame(height: Theme.tabHeight)
+            TabBar(activeTab: $activeTab)
+                .frame(height: Theme.tabHeight)
 
-                    HStack(spacing: 0) {
-                        ControlsPanel(supervisor: supervisor)
-                            .frame(width: Theme.controlsWidth)
+            HStack(spacing: 0) {
+                ControlsPanel(supervisor: supervisor)
+                    .frame(width: Theme.controlsWidth)
 
-                        tabContent
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                tabContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                ScanlineOverlay()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -75,9 +69,12 @@ struct ContentView: View {
 
     private func startPhysics() {
         physicsTimer?.invalidate()
-        // .common mode keeps the timer firing during scroll/drag (default mode pauses)
+        // .common mode keeps the timer firing during scroll/drag (default mode pauses).
+        // Step inline — the timer already fires on the main thread. A Task{@MainActor}
+        // hop would queue on the main dispatch queue, which stalls during event
+        // tracking and would freeze physics during drags.
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self.supervisor.step(dt: 1.0 / 60.0 * Double(self.timeSpeed))
             }
         }
@@ -119,6 +116,8 @@ struct ContentView: View {
         case "g": supervisor.borationRate   = max(0, supervisor.borationRate   - step)
         case "p": supervisor.startupPermit  = !supervisor.startupPermit
         case "t": supervisor.turbineTrip    = !supervisor.turbineTrip
+        case "u": supervisor.autoStartup    = !supervisor.autoStartup
+        case "o": supervisor.rodAutoEnabled = !supervisor.rodAutoEnabled
         case "z": supervisor.pumpDegraded   = !supervisor.pumpDegraded
         case "x": supervisor.feedwaterFault = !supervisor.feedwaterFault
         case "c": supervisor.acknowledgeAllAlarms()
@@ -142,40 +141,5 @@ struct ContentView: View {
             default: break
             }
         }
-    }
-}
-
-// MARK: — Subtle grid background
-
-private struct GridBackground: View {
-    var body: some View {
-        Canvas { ctx, size in
-            let sp: CGFloat = 48
-            let col = GraphicsContext.Shading.color(.white.opacity(0.025))
-            var p = Path()
-            var x: CGFloat = 0
-            while x <= size.width  { p.move(to: .init(x: x, y: 0));           p.addLine(to: .init(x: x, y: size.height)); x += sp }
-            var y: CGFloat = 0
-            while y <= size.height { p.move(to: .init(x: 0, y: y));           p.addLine(to: .init(x: size.width, y: y));  y += sp }
-            ctx.stroke(p, with: col, lineWidth: 0.5)
-        }
-        .allowsHitTesting(false)
-        .drawingGroup()
-    }
-}
-
-// MARK: — CRT scanline overlay
-
-private struct ScanlineOverlay: View {
-    var body: some View {
-        Canvas { ctx, size in
-            let col = GraphicsContext.Shading.color(.black.opacity(0.055))
-            var p = Path()
-            var y: CGFloat = 0
-            while y < size.height { p.move(to: .init(x: 0, y: y)); p.addLine(to: .init(x: size.width, y: y)); y += 2 }
-            ctx.stroke(p, with: col, lineWidth: 1)
-        }
-        .allowsHitTesting(false)
-        .drawingGroup()
     }
 }
