@@ -39,9 +39,9 @@ enum Theme {
     // Locked-in design: squircle (.continuous) corners — panels 16, controls 12.
     static let panelRadius: CGFloat     = 16
     static let controlRadius: CGFloat   = 12
-    static let panelPadding: CGFloat    = 16
-    static let headerHeight: CGFloat    = 56
-    static let tabHeight: CGFloat       = 36
+    static let panelPadding: CGFloat    = 12
+    static let headerHeight: CGFloat    = 44   // thin utility bar, not a billboard
+    static let tabHeight: CGFloat       = 30
     static let controlsWidth: CGFloat   = 300
 
     // MARK: — Fonts (monospace DCS readouts)

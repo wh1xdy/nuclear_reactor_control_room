@@ -35,6 +35,7 @@ private struct ProtectionChannelsPanel: View {
                 ("T-FUEL AVG",    s.fuelTempK,           "K",   1400.0, 1500.0),
                 ("PZR PRESSURE",  supervisor.pressureMPa,"MPa",   16.3, 17.0),
                 ("RCS T-AVG",     s.coolantTempK,        "K",    610.0, 620.0),
+                ("SG TEMP",       s.sgTempK,             "K",    600.0, 620.0),
             ]
 
             VStack(spacing: 0) {
@@ -101,7 +102,21 @@ private struct ProtectionChannelsPanel: View {
                 }
             }
             .padding(.bottom, 4)
+            Spacer(minLength: 0)
+            // Footer: coincidence logic status line — fills the panel honestly
+            HStack {
+                Text("2-OF-3 COINCIDENCE LOGIC  ·  CHANNELS IN TEST: NONE  ·  BYPASS: NONE")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Theme.textDim.opacity(0.7))
+                Spacer()
+                Text("RPS NORMAL")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.textDim)
+            }
+            .padding(.horizontal, Theme.panelPadding)
+            .padding(.bottom, 10)
         }
+        .frame(maxHeight: .infinity)
         .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
     }
 }
