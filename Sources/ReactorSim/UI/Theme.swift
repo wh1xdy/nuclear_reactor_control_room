@@ -3,16 +3,35 @@
 
 import SwiftUI
 
+// MARK: — Skin
+// Two visual identities the operator can switch between at runtime:
+//  • .guided    — Liquid Glass, softer corners, beginner-friendly. The "premium" look.
+//  • .authentic — flat panels, hard 1px borders, sharp corners. Real-DCS look.
+// `Theme.skin` is a plain static var; ContentView mirrors the user's choice into
+// it and re-keys the view tree (.id(skin)) so every surface rebuilds on switch.
+enum Skin: String, CaseIterable {
+    case guided
+    case authentic
+
+    var label: String { self == .guided ? "GUIDED" : "AUTHENTIC" }
+    var next: Skin { self == .guided ? .authentic : .guided }
+}
+
 enum Theme {
+    // Active skin — set once by ContentView before the tree builds.
+    static var skin: Skin = .guided
+    static var isFlat: Bool { skin == .authentic }
+
     // MARK: — Background
-    static let bg         = Color(r: 10,  g: 12,  b: 14)
+    // Authentic runs a darker desk so the flat bordered panels read as raised.
+    static var bg         : Color { isFlat ? Color(r: 6, g: 7, b: 9) : Color(r: 10, g: 12, b: 14) }
     static let panel      = Color(r: 16,  g: 19,  b: 22)
     static let panelHdr   = Color(r: 20,  g: 24,  b: 28)
     static let border     = Color(r: 44,  g: 50,  b: 56)
     static let sep        = Color(r: 30,  g: 34,  b: 38)
 
     // MARK: — Text
-    static let text       = Color(r: 215, g: 218, b: 215)
+    static var text       : Color { isFlat ? Color(r: 228, g: 231, b: 224) : Color(r: 215, g: 218, b: 215) }
     static let textDim    = Color(r: 85,  g: 94,  b: 88)
     static let textHdr    = Color(r: 135, g: 145, b: 140)
 
@@ -36,9 +55,10 @@ enum Theme {
     static let sliderFg   = Color(r: 48,  g: 144, b: 200)
 
     // MARK: — Sizing
-    // Locked-in design: squircle (.continuous) corners — panels 16, controls 12.
-    static let panelRadius: CGFloat     = 16
-    static let controlRadius: CGFloat   = 12
+    // Guided uses squircle (.continuous) corners; authentic uses near-square
+    // corners like a real DCS mimic. Both read the same token names.
+    static var panelRadius: CGFloat     { isFlat ? 3 : 16 }
+    static var controlRadius: CGFloat   { isFlat ? 2 : 12 }
     static let panelPadding: CGFloat    = 12
     static let headerHeight: CGFloat    = 44   // thin utility bar, not a billboard
     static let tabHeight: CGFloat       = 30
@@ -89,5 +109,74 @@ extension Color {
         if abs(rho) > 0.005 { return Theme.alarm }
         if abs(rho) > 0.001 { return Theme.caution }
         return Theme.text
+    }
+}
+
+// MARK: — Skin-aware surfaces
+// One choke point for the glass-vs-flat decision. Every panel and control routes
+// through these so a skin switch is a single branch, not a per-view rewrite.
+
+enum CtrlShape { case rounded, capsule, panel }
+
+extension View {
+    /// Panel container surface. Guided → Liquid Glass; Authentic → flat fill + hard 1px border.
+    @ViewBuilder
+    func panelSurface() -> some View {
+        switch Theme.skin {
+        case .guided:
+            self.glassEffect(.regular,
+                             in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        case .authentic:
+            self.background(Theme.panel)
+                .clipShape(.rect(cornerRadius: Theme.panelRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
+                        .strokeBorder(Theme.border, lineWidth: 1))
+        }
+    }
+
+    /// Lightweight static readout chip (non-interactive value tiles).
+    @ViewBuilder
+    func readoutSurface() -> some View {
+        switch Theme.skin {
+        case .guided:
+            self.glassEffect(.clear, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
+        case .authentic:
+            self.background(Color.white.opacity(0.025))
+                .clipShape(.rect(cornerRadius: Theme.controlRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                        .strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
+        }
+    }
+
+    /// Interactive control surface (buttons, pills, tiles).
+    /// `tint` is the PURE status color (nil = neutral). Each skin decides how to express it.
+    @ViewBuilder
+    func controlSurface(tint: Color? = nil, shape: CtrlShape = .rounded) -> some View {
+        let r: CGFloat = {
+            switch shape {
+            case .capsule: return 999
+            case .panel:   return Theme.panelRadius
+            case .rounded: return Theme.controlRadius
+            }
+        }()
+        switch Theme.skin {
+        case .guided:
+            if let tint {
+                self.glassEffect(.regular.tint(tint.opacity(0.20)).interactive(),
+                                 in: .rect(cornerRadius: r, style: .continuous))
+            } else {
+                self.glassEffect(.regular.interactive(),
+                                 in: .rect(cornerRadius: r, style: .continuous))
+            }
+        case .authentic:
+            self.background(tint == nil ? AnyShapeStyle(Theme.panelHdr)
+                                        : AnyShapeStyle(tint!.opacity(0.22)))
+                .clipShape(.rect(cornerRadius: r, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: r, style: .continuous)
+                        .strokeBorder(tint ?? Theme.border, lineWidth: tint == nil ? 1 : 1.5))
+        }
     }
 }

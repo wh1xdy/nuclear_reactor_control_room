@@ -5,7 +5,9 @@ import SwiftUI
 struct HeaderBar: View {
     let supervisor: PlantSupervisor
     let timeSpeed: Int
+    let skin: Skin
     let onSpeedCycle: () -> Void
+    let onSkinToggle: () -> Void
 
     var body: some View {
         ZStack {
@@ -23,6 +25,27 @@ struct HeaderBar: View {
                         .foregroundStyle(Theme.textDim)
                 }
                 .padding(.leading, 18)
+
+                // Skin switch — GUIDED (Liquid Glass) ⇄ AUTHENTIC (flat DCS)
+                Button(action: onSkinToggle) {
+                    HStack(spacing: 6) {
+                        Image(systemName: skin == .guided ? "sparkles" : "square.grid.3x3.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.accent)
+                        Text(skin.label)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white)
+                        Text("[M]")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(Theme.textDim)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .controlSurface(shape: .capsule)
+                .padding(.leading, 14)
 
                 Spacer()
 
@@ -42,11 +65,11 @@ struct HeaderBar: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: Capsule())
+                    .controlSurface(shape: .capsule)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 5)
-                .glassEffect(.regular, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
+                .controlSurface()
                 .padding(.horizontal, 16)
 
                 Spacer()
@@ -101,8 +124,7 @@ private struct AlarmIndicator: View {
                         .foregroundStyle(.white)
                 }
                 .padding(.horizontal, 16)
-                .glassEffect(.regular.tint(Theme.alarm.opacity(0.3)).interactive(),
-                             in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
+                .controlSurface(tint: Theme.alarm)
             } else if hasAlarms {
                 HStack(spacing: 8) {
                     Circle().fill(blink ? Theme.caution : Theme.caution.opacity(0.5))
@@ -113,8 +135,7 @@ private struct AlarmIndicator: View {
                         .foregroundStyle(.white)
                 }
                 .padding(.horizontal, 16)
-                .glassEffect(.regular.tint(Theme.caution.opacity(0.2)),
-                             in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
+                .controlSurface(tint: Theme.caution)
             } else {
                 // Normal state stays quiet — no ISA green on a non-alarm condition.
                 HStack(spacing: 8) {
@@ -125,8 +146,7 @@ private struct AlarmIndicator: View {
                         .foregroundStyle(Theme.textDim)
                 }
                 .padding(.horizontal, 16)
-                .glassEffect(.regular,
-                             in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
+                .controlSurface()
             }
         }
         .frame(maxWidth: .infinity)

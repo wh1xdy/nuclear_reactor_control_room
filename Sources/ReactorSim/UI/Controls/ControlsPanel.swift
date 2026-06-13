@@ -11,6 +11,16 @@ struct ControlsPanel: View {
                 // Section header
                 sectionLabel("CONTROLS")
 
+                // Guided mode coaches the operator; authentic assumes expertise.
+                if !Theme.isFlat {
+                    Text("Drag a fader to set a demand — or use the keys: W/S rods · A/D flow · Q/E turbine")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Theme.textDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 2)
+                }
+
                 // Restrained palette: all sliders use the single electric-blue accent.
                 // Rod demand reads in steps withdrawn (0–228), real CRDM convention.
                 VStack(spacing: 18) {
@@ -83,7 +93,20 @@ struct ControlsPanel: View {
                     .padding(.bottom, 20)
             }
         }
-        .background(.ultraThinMaterial)
+        .background(controlsPanelBackground)
+    }
+
+    // Guided floats the controls on glass; authentic seats them on a flat,
+    // bordered console panel — no translucency on a hardened control surface.
+    @ViewBuilder
+    private var controlsPanelBackground: some View {
+        if Theme.isFlat {
+            Theme.panel
+                .overlay(Rectangle().frame(width: 1).foregroundStyle(Theme.border),
+                         alignment: .trailing)
+        } else {
+            Rectangle().fill(.ultraThinMaterial)
+        }
     }
 
     private func sectionLabel(_ text: String) -> some View {
@@ -98,20 +121,28 @@ struct ControlsPanel: View {
 }
 
 // MARK: — Slim PanelHeader used across all tabs
-// Pure glass design: plain tracked label, no material strip, no accent rule.
+// Guided: pure-glass plain tracked label, no strip. Authentic: a filled DCS
+// title bar with an accent tick and a bottom rule — reads as a discrete instrument.
 struct PanelHeader: View {
     let title: String
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
+            if Theme.isFlat {
+                Rectangle().fill(Theme.accent).frame(width: 3, height: 11)
+            }
             Text(title)
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Theme.textHdr)
+                .foregroundStyle(Theme.isFlat ? Theme.text : Theme.textHdr)
                 .tracking(1.6)
             Spacer()
         }
         .padding(.horizontal, Theme.panelPadding)
-        .padding(.top, 10)
-        .padding(.bottom, 3)
+        .padding(.top, Theme.isFlat ? 6 : 10)
+        .padding(.bottom, Theme.isFlat ? 6 : 3)
+        .background(Theme.isFlat ? Theme.panelHdr : Color.clear)
+        .overlay(alignment: .bottom) {
+            if Theme.isFlat { Rectangle().fill(Theme.border).frame(height: 1) }
+        }
     }
 }
 
@@ -216,12 +247,7 @@ struct ToggleButton: View {
             .contentShape(Rectangle())   // whole tile is hittable, not just glyphs
         }
         .buttonStyle(.plain)
-        .glassEffect(
-            state
-                ? .regular.tint(statusColor.opacity(0.2)).interactive()
-                : .regular.interactive(),
-            in: .rect(cornerRadius: Theme.controlRadius, style: .continuous)
-        )
+        .controlSurface(tint: state ? statusColor : nil)
     }
 }
 
@@ -255,12 +281,7 @@ struct ScramButton: View {
             .contentShape(Rectangle())   // full button face is hittable
         }
         .buttonStyle(.plain)
-        .glassEffect(
-            supervisor.scrammed
-                ? .regular.tint(Theme.alarm.opacity(blink ? 0.5 : 0.2)).interactive()
-                : .regular.tint(Theme.alarm.opacity(0.15)).interactive(),
-            in: .rect(cornerRadius: Theme.controlRadius, style: .continuous)
-        )
+        .controlSurface(tint: Theme.alarm.opacity(supervisor.scrammed ? (blink ? 1.0 : 0.5) : 0.8))
         .onReceive(timer) { _ in blink.toggle() }
     }
 }

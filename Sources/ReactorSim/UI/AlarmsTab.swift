@@ -62,7 +62,7 @@ struct AlarmsTab: View {
                 }
                 .padding(Theme.panelPadding)
             }
-            .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+            .panelSurface()
 
             // ── Chronological alarm summary ───────────────────────────────────
             VStack(spacing: 0) {
@@ -107,7 +107,7 @@ struct AlarmsTab: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+            .panelSurface()
         }
         .padding(12)
         .onReceive(timer) { _ in blink.toggle() }

@@ -22,7 +22,7 @@ struct PrimaryTab: View {
                 .padding(20)
                 .frame(maxHeight: .infinity)
             }
-            .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+            .panelSurface()
             .frame(maxWidth: .infinity)
 
             // Right: DCS readout grid + status
@@ -66,7 +66,7 @@ private struct DCSGrid: View {
             }
             .padding(8)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
     }
 
     private func readouts(s: PlantSnapshot, nomP: Double) -> [(String, String, Color)] {[
@@ -104,7 +104,7 @@ private struct RCPPanel: View {
             }
         }
         .padding(10)
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxWidth: .infinity)
     }
     private func readoutRow(_ l: String, _ v: String, _ c: Color) -> some View {
@@ -126,7 +126,7 @@ private struct PressPanel: View {
                 .padding(8)
                 .frame(height: 120)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
     }
 }
 
@@ -143,7 +143,7 @@ struct DCSReadout: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.clear, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
+        .readoutSurface()
     }
 }
 
