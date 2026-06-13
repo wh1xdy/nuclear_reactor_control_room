@@ -50,6 +50,7 @@ struct BarMeterView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
+            let flat = Theme.isFlat
             Canvas { ctx, size in
                 let w = size.width
                 let barW: CGFloat = min(16, max(10, w * 0.30))
@@ -57,6 +58,7 @@ struct BarMeterView: View {
                 let yTop: CGFloat = 4
                 let yBot = size.height - 4
                 let span = yBot - yTop
+                let trackR: CGFloat = flat ? 0 : 5   // authentic: square sight-glass
 
                 func yFor(_ v: Double) -> CGFloat {
                     let f = max(0, min(1, (v - lo) / max(1e-9, hi - lo)))
@@ -66,8 +68,12 @@ struct BarMeterView: View {
                 // Track
                 ctx.fill(
                     Path(roundedRect: CGRect(x: barX, y: yTop, width: barW, height: span),
-                         cornerRadius: 5, style: .continuous),
-                    with: .color(.white.opacity(0.06)))
+                         cornerRadius: trackR, style: .continuous),
+                    with: .color(.white.opacity(flat ? 0.09 : 0.06)))
+                if flat {
+                    ctx.stroke(Path(CGRect(x: barX, y: yTop, width: barW, height: span)),
+                               with: .color(.white.opacity(0.20)), lineWidth: 1)
+                }
 
                 // Calibrated scale: 5 major ticks with values, minor ticks between
                 for i in 0...4 {
@@ -75,7 +81,7 @@ struct BarMeterView: View {
                     let y = yFor(v)
                     var p = Path()
                     p.move(to: .init(x: barX - 8, y: y)); p.addLine(to: .init(x: barX - 2, y: y))
-                    ctx.stroke(p, with: .color(.white.opacity(0.35)), lineWidth: 1)
+                    ctx.stroke(p, with: .color(.white.opacity(flat ? 0.5 : 0.35)), lineWidth: 1)
                     ctx.draw(
                         Text(String(format: tickFormat, v))
                             .font(.system(size: 8, design: .monospaced))
@@ -86,7 +92,7 @@ struct BarMeterView: View {
                     let y = yFor(lo + (hi - lo) * Double(i) / 20)
                     var p = Path()
                     p.move(to: .init(x: barX - 5, y: y)); p.addLine(to: .init(x: barX - 2, y: y))
-                    ctx.stroke(p, with: .color(.white.opacity(0.15)), lineWidth: 0.5)
+                    ctx.stroke(p, with: .color(.white.opacity(flat ? 0.25 : 0.15)), lineWidth: 0.5)
                 }
 
                 // Fill bar
@@ -94,8 +100,8 @@ struct BarMeterView: View {
                 if fh > 0.5 {
                     ctx.fill(
                         Path(roundedRect: CGRect(x: barX + 2, y: yBot - fh, width: barW - 4, height: fh),
-                             cornerRadius: 3, style: .continuous),
-                        with: .color(fillColor.opacity(0.85)))
+                             cornerRadius: flat ? 0 : 3, style: .continuous),
+                        with: .color(fillColor.opacity(flat ? 0.95 : 0.85)))
                 }
 
                 // Setpoint markers: line across the bar + pointer flag at right

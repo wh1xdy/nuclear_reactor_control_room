@@ -66,7 +66,11 @@ private struct StatusReadoutsPanel: View {
                           snap.fuelTempK > 1400 ? Theme.alarm : snap.fuelTempK > 1200 ? Theme.caution : Theme.text)
                 statusRow("RCS T-AVG",    snap.coolantTempK.fmt("%6.1f"), "K",
                           snap.coolantTempK > 616 ? Theme.alarm : snap.coolantTempK > 580 ? Theme.caution : Theme.text)
+                statusRow("RCS T-HOT",    snap.hotLegTempK.fmt("%6.1f"), "K",
+                          snap.hotLegTempK > 600 ? Theme.caution : Theme.text)
+                statusRow("RCS T-COLD",   snap.coldLegTempK.fmt("%6.1f"), "K", Theme.text)
                 statusRow("SG TEMP",      snap.sgTempK.fmt("%6.1f"), "K", Theme.text)
+                statusRow("STM PRESS",    snap.steamPressureMPa.fmt("%6.3f"), "MPa", Theme.text)
                 Divider().background(Theme.sep)
                 statusRow("PZR PRESS",    supervisor.pressureMPa.fmt("%6.3f"), "MPa",
                           supervisor.pressureMPa > 17.0 ? Theme.alarm : supervisor.pressureMPa > 16.3 ? Theme.caution : Theme.text)

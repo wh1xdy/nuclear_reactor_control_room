@@ -110,6 +110,14 @@ struct PIDCanvas: View {
                            (tb.minX, tb.midY)], phase: -(t * Double(sup.turbineValve) * 22.0))
         }
 
+        // Hot/cold leg temperatures — the loop ΔT from the two-node coolant model
+        drawAnnotation(ctx, pos: CGPoint(x: (rv.maxX + midX) / 2 - 16, y: rv.minY + fy(0.12) - 10),
+                       text: snap.hotLegTempK.isSafe ? String(format: "%.0f K", snap.hotLegTempK) : "---",
+                       color: Theme.hotLeg, fontSize: 9)
+        drawAnnotation(ctx, pos: CGPoint(x: (rcp.maxX + midX) / 2 - 16, y: coldY + 7),
+                       text: snap.coldLegTempK.isSafe ? String(format: "%.0f K", snap.coldLegTempK) : "---",
+                       color: Theme.water, fontSize: 9)
+
         // ── Component boxes — industrial line work ────────────────────────────
         // Equipment is NEUTRAL: one fill, one hairline. Color belongs to the
         // process (pipes) and to live alarm states only.

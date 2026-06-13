@@ -60,6 +60,7 @@ private struct SecondaryDCSGrid: View {
                 DCSReadout(label: "GROSS ELEC",   value: String(format: "%6.1f MWe", s.electricPowerW / 1e6), color: Theme.text)
                 DCSReadout(label: "SG TEMP",      value: String(format: "%6.1f K", s.sgTempK),
                            color: s.sgTempK > 600 ? Theme.caution : Theme.text)
+                DCSReadout(label: "STEAM PRESS",  value: String(format: "%6.3f MPa", s.steamPressureMPa), color: Theme.text)
                 DCSReadout(label: "COND TEMP",    value: String(format: "%6.1f K", supervisor.condTempK),
                            color: supervisor.condTempK > 330 ? Theme.caution : Theme.text)
                 DCSReadout(label: "STEAM INV",    value: String(format: "%6.3f", supervisor.steamInv),

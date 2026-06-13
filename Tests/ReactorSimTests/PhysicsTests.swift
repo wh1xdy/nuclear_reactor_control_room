@@ -79,6 +79,54 @@ final class PlantTests: XCTestCase {
     }
 }
 
+final class ThermalHydraulicsTests: XCTestCase {
+
+    /// Two-node loop: hot leg > T-avg > cold leg, with ~30 K core ΔT at full power.
+    func testHotColdLegSplit() {
+        let plant = PWRPlant()
+        let ctrl  = ControlInputs(rodPosition: 0, primaryFlow: 1, turbineValve: 1, scram: false)
+        var snap  = plant.step(dt: 1, ctrl: ctrl)
+        for _ in 0..<600 { snap = plant.step(dt: 1, ctrl: ctrl) }
+
+        XCTAssertGreaterThan(snap.hotLegTempK, snap.coolantTempK)   // hot leg above avg
+        XCTAssertLessThan(snap.coldLegTempK,  snap.coolantTempK)    // cold leg below avg
+        XCTAssertEqual(snap.hotLegTempK - snap.coldLegTempK, 30, accuracy: 6)
+        XCTAssertEqual((snap.hotLegTempK + snap.coldLegTempK) / 2, snap.coolantTempK, accuracy: 0.6)
+    }
+
+    /// Dittus–Boelter: at reduced flow the convective HTC drops (∝ flow^0.8) and
+    /// advection halves, so the fuel runs hotter and the core ΔT widens.
+    func testReducedFlowRaisesFuelTemp() {
+        let p = PlantParams()
+        let full = ThermalHydraulics(p)
+        let low  = ThermalHydraulics(p)
+        for _ in 0..<20000 { full.step(dt: 0.05, thermalPower: p.nominalPower, flow: 1.0, turbineValve: 1) }
+        for _ in 0..<20000 { low.step(dt: 0.05,  thermalPower: p.nominalPower, flow: 0.5, turbineValve: 1) }
+
+        XCTAssertGreaterThan(low.tFuel, full.tFuel + 50)                       // weaker convection
+        XCTAssertGreaterThan(low.tHot - low.tCold, full.tHot - full.tCold)     // wider ΔT
+        XCTAssertTrue(low.tFuel.isFinite && full.tFuel.isFinite)
+    }
+
+    /// Transport delay: after a power step the delivered (lagged) hot-leg
+    /// temperature trails the core-outlet temperature.
+    func testTransportDelayLag() {
+        let p  = PlantParams()
+        let th = ThermalHydraulics(p)
+        for _ in 0..<20000 { th.step(dt: 0.05, thermalPower: p.nominalPower, flow: 1, turbineValve: 1) }
+        for _ in 0..<8 { th.step(dt: 0.05, thermalPower: p.nominalPower * 1.4, flow: 1, turbineValve: 1) }
+        XCTAssertGreaterThan(th.tHot, th.tHL)   // SG inlet lags the rising core outlet
+    }
+
+    /// Saturation steam-pressure model: ~1.9 MPa at the 490 K SG, monotonic in T.
+    func testSaturationSteamPressure() {
+        XCTAssertEqual(ThermalHydraulics.satPressureMPa(490), 1.9, accuracy: 0.5)
+        XCTAssertGreaterThan(ThermalHydraulics.satPressureMPa(520),
+                             ThermalHydraulics.satPressureMPa(490))
+        XCTAssertLessThan(ThermalHydraulics.satPressureMPa(310), 0.01)   // condenser vacuum
+    }
+}
+
 @MainActor
 final class SupervisorTests: XCTestCase {
 
