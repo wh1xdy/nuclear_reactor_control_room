@@ -96,7 +96,7 @@ private struct ReactivityBudgetPanel: View {
             .padding(.vertical, 8)
             .frame(maxHeight: .infinity)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxWidth: .infinity)
     }
 }
@@ -119,7 +119,7 @@ private struct XenonTrendPanel: View {
             .padding(Theme.panelPadding)
             .frame(maxHeight: .infinity)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxWidth: .infinity)
     }
 }
@@ -185,7 +185,7 @@ private struct RodWorthCurvePanel: View {
             .padding(4)
             .frame(maxHeight: .infinity)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
     }
 }
 
@@ -210,7 +210,7 @@ private struct ReactivityReadoutsPanel: View {
             }
             .padding(Theme.panelPadding)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxHeight: .infinity)
     }
     private func readRow(_ l: String, _ v: String, _ c: Color) -> some View {

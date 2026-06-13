@@ -53,9 +53,6 @@ private struct TabButton: View {
             .contentShape(Rectangle())   // full rect is hittable, not just the text glyphs
         }
         .buttonStyle(.plain)
-        .glassEffect(
-            active ? .regular.tint(Theme.accent.opacity(0.15)).interactive() : .regular.interactive(),
-            in: .rect(cornerRadius: Theme.controlRadius, style: .continuous)
-        )
+        .controlSurface(tint: active ? Theme.accent : nil)
     }
 }

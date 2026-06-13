@@ -21,7 +21,7 @@ struct SecondaryTab: View {
                 .padding(20)
                 .frame(maxHeight: .infinity)
             }
-            .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+            .panelSurface()
             .frame(maxWidth: .infinity)
 
             // Right: DCS boxes + electric output
@@ -76,7 +76,7 @@ private struct SecondaryDCSGrid: View {
             }
             .padding(10)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
     }
 }
 
@@ -108,7 +108,7 @@ private struct ElectricOutputPanel: View {
             }
             .padding(Theme.panelPadding)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
     }
     private func readoutRow(_ l: String, _ v: String, _ c: Color) -> some View {
         HStack { Text(l).font(Theme.readoutSm).foregroundStyle(Theme.textDim); Spacer()
@@ -131,7 +131,7 @@ private struct SecondaryTrends: View {
             }
             .padding(12)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxHeight: .infinity)
     }
 }

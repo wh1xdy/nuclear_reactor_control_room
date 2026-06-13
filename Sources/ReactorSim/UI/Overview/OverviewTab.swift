@@ -36,7 +36,7 @@ private struct PIDPanel: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(8)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxWidth: .infinity)
         .frame(height: 320)
     }
@@ -93,7 +93,7 @@ private struct StatusReadoutsPanel: View {
             .padding(.vertical, 10)
             Spacer(minLength: 0)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -148,7 +148,7 @@ private struct InstrumentPanel: View {
             }
             .padding(12)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(height: 180)
     }
 }
@@ -175,7 +175,7 @@ private struct TrendsPanel: View {
             }
             .padding(Theme.panelPadding)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxHeight: .infinity)
     }
 }

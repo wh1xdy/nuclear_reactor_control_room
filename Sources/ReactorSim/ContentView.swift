@@ -12,15 +12,23 @@ struct ContentView: View {
     @State private var physicsTimer: Timer?
     @State private var keyMonitor:   Any?
 
+    // Visual skin — persisted across launches. Mirrored into Theme.skin so the
+    // static design tokens resolve correctly; .id(skin) rebuilds the tree on switch.
+    @AppStorage("reactorSkin") private var skinRaw = Skin.guided.rawValue
+    private var skin: Skin { Skin(rawValue: skinRaw) ?? .guided }
+
     private let speeds = [1, 10, 60, 600]
 
     var body: some View {
+        // Resolve the active skin for this build pass before any surface reads it.
+        let _ = (Theme.skin = skin)
         // No root TimelineView — @Observable supervisor drives redraws via the Timer.
-        // Scoped TimelineView lives inside PIDCanvas only (flow dot animation).
+        // Scoped TimelineView lives inside PIDCanvas only (flow animation).
         layout
+            .id(skin)                       // rebuild only the content subtree on skin switch
             .background(Theme.bg)
             .frame(minWidth: 1100, minHeight: 700)
-            .onAppear {
+            .onAppear {                     // stable identity — physics/keys start once
                 startPhysics()
                 startKeyMonitor()
             }
@@ -30,12 +38,14 @@ struct ContentView: View {
             }
     }
 
+    private func toggleSkin() { skinRaw = skin.next.rawValue }
+
     // MARK: — Layout (read-only from supervisor)
 
     private var layout: some View {
         VStack(spacing: 0) {
             HeaderBar(supervisor: supervisor, timeSpeed: timeSpeed,
-                      onSpeedCycle: cycleSpeed)
+                      skin: skin, onSpeedCycle: cycleSpeed, onSkinToggle: toggleSkin)
                 .frame(height: Theme.headerHeight)
 
             TabBar(activeTab: $activeTab)
@@ -120,6 +130,7 @@ struct ContentView: View {
         case "o": supervisor.rodAutoEnabled = !supervisor.rodAutoEnabled
         case "z": supervisor.pumpDegraded   = !supervisor.pumpDegraded
         case "x": supervisor.feedwaterFault = !supervisor.feedwaterFault
+        case "m": toggleSkin()
         case "c": supervisor.acknowledgeAllAlarms()
         case "l": supervisor.resetScram()
         case "r": supervisor = PlantSupervisor(); startPhysics()

@@ -117,7 +117,7 @@ private struct ProtectionChannelsPanel: View {
             .padding(.bottom, 10)
         }
         .frame(maxHeight: .infinity)
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
     }
 }
 
@@ -164,7 +164,7 @@ private struct AutoControllersPanel: View {
             }
             .padding(Theme.panelPadding)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
+        .panelSurface()
         .frame(maxHeight: .infinity)
     }
 
@@ -207,9 +207,6 @@ private struct AutoControllersPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .glassEffect(
-            enabled ? .regular.tint(Theme.accent.opacity(0.10)).interactive()
-                    : .clear.interactive(),
-            in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
+        .controlSurface(tint: enabled ? Theme.accent : nil)
     }
 }
