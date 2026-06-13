@@ -87,27 +87,27 @@ struct PIDCanvas: View {
                    (sg.maxX,   fwY),
                    (sg.maxX,   sg.maxY - fy(0.10))], cldColor, w: 3)
 
-        // ── Animated flow dots (primary loop) ────────────────────────────────
-        let segs: [(CGPoint, CGPoint, Color)] = [
-            (CGPoint(x: rv.maxX,  y: rv.minY+fy(0.12)), CGPoint(x: midX,     y: rv.minY+fy(0.12)), hotColor),
-            (CGPoint(x: midX,     y: rv.minY+fy(0.12)), CGPoint(x: midX,     y: sg.minY+fy(0.08)), hotColor),
-            (CGPoint(x: midX,     y: sg.minY+fy(0.08)), CGPoint(x: sg.minX,  y: sg.minY+fy(0.08)), hotColor),
-            (CGPoint(x: sg.minX,  y: sg.maxY-fy(0.08)), CGPoint(x: midX,     y: sg.maxY-fy(0.08)), cldColor),
-            (CGPoint(x: midX,     y: sg.maxY-fy(0.08)), CGPoint(x: midX,     y: coldY),             cldColor),
-            (CGPoint(x: midX,     y: coldY),             CGPoint(x: rcp.maxX, y: coldY),             cldColor),
-            (CGPoint(x: rcp.minX, y: coldY),             CGPoint(x: rv.midX,  y: coldY),             cldColor),
-            (CGPoint(x: rv.midX,  y: coldY),             CGPoint(x: rv.midX,  y: rv.maxY),           cldColor),
-        ]
-        for (si, (p0, p1, dotCol)) in segs.enumerated() {
-            for di in 0..<3 {
-                let phase = t * flow * 0.5 + Double(si) / Double(segs.count) + Double(di) / 3.0
-                let frac2 = CGFloat(phase.truncatingRemainder(dividingBy: 1.0))
-                let pt = CGPoint(x: p0.x + (p1.x - p0.x) * frac2,
-                                 y: p0.y + (p1.y - p0.y) * frac2)
-                var dp = Path()
-                dp.addEllipse(in: CGRect(x: pt.x-3, y: pt.y-3, width: 6, height: 6))
-                ctx.fill(dp, with: .color(dotCol.opacity(0.85)))
-            }
+        // ── Flow animation — SCADA-style scrolling dash overlay ───────────────
+        // Not marching pellets. A faint, lighter dash pattern slides ALONG each
+        // pipe in the direction of flow — the standard control-room "this line is
+        // live and moving" cue. Speed ∝ flow; freezes when pumps coast down.
+        let hotPath: [(CGFloat, CGFloat)] = [
+            (rv.maxX, rv.minY+fy(0.12)), (midX, rv.minY+fy(0.12)),
+            (midX, sg.minY+fy(0.08)),    (sg.minX, sg.minY+fy(0.08))]
+        let coldPathA: [(CGFloat, CGFloat)] = [
+            (sg.minX, sg.maxY-fy(0.08)), (midX, sg.maxY-fy(0.08)),
+            (midX, coldY),               (rcp.maxX, coldY)]
+        let coldPathB: [(CGFloat, CGFloat)] = [
+            (rcp.minX, coldY), (rv.midX, coldY), (rv.midX, rv.maxY)]
+        // dashPhase decreases over time → dashes travel in the path's direction.
+        let phase = -(t * flow * 22.0)
+        flowDash(ctx, hotPath,   phase: phase)
+        flowDash(ctx, coldPathA, phase: phase)
+        flowDash(ctx, coldPathB, phase: phase)
+        // Secondary side: steam out
+        if sup.turbineValve > 0.02 && !snap.scrammed {
+            flowDash(ctx, [(sg.maxX, sg.minY+fy(0.10)), (tb.minX, sg.minY+fy(0.10)),
+                           (tb.minX, tb.midY)], phase: -(t * Double(sup.turbineValve) * 22.0))
         }
 
         // ── Component boxes — industrial line work ────────────────────────────
@@ -194,6 +194,20 @@ struct PIDCanvas: View {
         path.move(to: CGPoint(x: pts[0].0, y: pts[0].1))
         for p in pts.dropFirst() { path.addLine(to: CGPoint(x: p.0, y: p.1)) }
         ctx.stroke(path, with: .color(color), lineWidth: w)
+    }
+
+    // Scrolling-dash flow overlay: a lighter dashed stroke laid over the pipe,
+    // its dashPhase animated so the gaps slide along the line. Reads as moving
+    // fluid without the toy "pellet" look.
+    private func flowDash(_ ctx: GraphicsContext, _ pts: [(CGFloat, CGFloat)],
+                          phase: Double) {
+        guard pts.count >= 2 else { return }
+        var path = Path()
+        path.move(to: CGPoint(x: pts[0].0, y: pts[0].1))
+        for p in pts.dropFirst() { path.addLine(to: CGPoint(x: p.0, y: p.1)) }
+        let style = StrokeStyle(lineWidth: 2, lineCap: .butt,
+                                dash: [3, 9], dashPhase: CGFloat(phase))
+        ctx.stroke(path, with: .color(.white.opacity(0.55)), style: style)
     }
 
     // Neutral equipment body: one fill, one hairline. `color` overrides the
