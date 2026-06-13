@@ -12,10 +12,13 @@ struct ArcGaugeView: View {
 
     private var fraction: Double { max(0, min(1, (value - lo) / max(1e-9, hi - lo))) }
 
+    // Color from the REAL trip setpoint, not "% of scale" — the latter painted
+    // normal 100 % power amber on a 0–130 scale. Neutral unless near/over trip.
     private var statusColor: Color {
-        if value > (hi * 0.9) { return Theme.alarm }
-        if value > (hi * 0.75) { return Theme.caution }
-        return .white            // normal range: neutral, not ISA green
+        guard let t = tripHi else { return .white }
+        if value > t        { return Theme.alarm }
+        if value > t * 0.95 { return Theme.caution }
+        return .white
     }
 
     var body: some View {
@@ -36,13 +39,14 @@ struct ArcGaugeView: View {
         let nSegs = 60
         let rOuter = r
         let rInner = r * 0.68
+        let flat = Theme.isFlat
 
         // Background arc — neutral track (no decorative color zones)
         for i in 0..<nSegs {
             let a0 = Angle.degrees(startDeg - Double(i)   * sweepDeg / Double(nSegs))
             let a1 = Angle.degrees(startDeg - Double(i+1) * sweepDeg / Double(nSegs))
             ctx.fill(arcSegPath(cx: cx, cy: cy, rO: rOuter, rI: rInner, a0: a0, a1: a1),
-                     with: .color(.white.opacity(0.07)))
+                     with: .color(.white.opacity(flat ? 0.11 : 0.07)))
         }
 
         // Filled arc up to current value — accent normally; amber/red only in the
@@ -71,7 +75,7 @@ struct ArcGaugeView: View {
             let x1 = cx + (rOuter + 7) * cos(a.radians)
             let y1 = cy - (rOuter + 7) * sin(a.radians)
             var p = Path(); p.move(to: .init(x: x0, y: y0)); p.addLine(to: .init(x: x1, y: y1))
-            ctx.stroke(p, with: .color(.white.opacity(0.35)), lineWidth: 1)
+            ctx.stroke(p, with: .color(.white.opacity(flat ? 0.5 : 0.35)), lineWidth: 1)
             let lx = cx + (rOuter + 14) * cos(a.radians)
             let ly = cy - (rOuter + 14) * sin(a.radians)
             ctx.draw(
@@ -87,7 +91,7 @@ struct ArcGaugeView: View {
             let x1 = cx + (rOuter + 5) * cos(a.radians)
             let y1 = cy - (rOuter + 5) * sin(a.radians)
             var p = Path(); p.move(to: .init(x: x0, y: y0)); p.addLine(to: .init(x: x1, y: y1))
-            ctx.stroke(p, with: .color(.white.opacity(0.15)), lineWidth: 0.5)
+            ctx.stroke(p, with: .color(.white.opacity(flat ? 0.25 : 0.15)), lineWidth: 0.5)
         }
 
         // Trip line

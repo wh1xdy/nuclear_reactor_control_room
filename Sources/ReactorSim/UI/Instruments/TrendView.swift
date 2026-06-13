@@ -19,14 +19,20 @@ struct TrendView: View {
     }
 
     var body: some View {
+        // Authentic draws a brighter, more present graticule like a real trend recorder.
+        let flat   = Theme.isFlat
+        let frameO = flat ? 0.32 : 0.13
+        let gridO  = flat ? 0.11 : 0.05
+        let vgridO = flat ? 0.075 : 0.035
+        let tickO  = flat ? 0.42 : 0.25
         Canvas { ctx, size in
             let W = size.width; let H = size.height
             let axisW: CGFloat = 38
             let plot = CGRect(x: 0.5, y: 0.5, width: W - axisW, height: H - 1)
 
             // Plot area + frame
-            ctx.fill(Path(plot), with: .color(.white.opacity(0.03)))
-            ctx.stroke(Path(plot), with: .color(.white.opacity(0.13)), lineWidth: 1)
+            ctx.fill(Path(plot), with: .color(.white.opacity(flat ? 0.02 : 0.03)))
+            ctx.stroke(Path(plot), with: .color(.white.opacity(frameO)), lineWidth: 1)
 
             // Horizontal grid: 4 divisions, each labeled with ITS OWN value
             for i in 0...4 {
@@ -36,12 +42,12 @@ struct TrendView: View {
                     var gp = Path()
                     gp.move(to: .init(x: plot.minX + 1, y: y))
                     gp.addLine(to: .init(x: plot.maxX - 1, y: y))
-                    ctx.stroke(gp, with: .color(.white.opacity(0.05)), lineWidth: 0.5)
+                    ctx.stroke(gp, with: .color(.white.opacity(gridO)), lineWidth: 0.5)
                 }
                 var tick = Path()
                 tick.move(to: .init(x: plot.maxX, y: y))
                 tick.addLine(to: .init(x: plot.maxX + 3, y: y))
-                ctx.stroke(tick, with: .color(.white.opacity(0.25)), lineWidth: 1)
+                ctx.stroke(tick, with: .color(.white.opacity(tickO)), lineWidth: 1)
 
                 let v = yHi - (yHi - yLo) * Double(fy)
                 let ly = min(max(y, 5), H - 5)
@@ -57,7 +63,7 @@ struct TrendView: View {
                 var gp = Path()
                 gp.move(to: .init(x: x, y: plot.minY + 1))
                 gp.addLine(to: .init(x: x, y: plot.maxY - 1))
-                ctx.stroke(gp, with: .color(.white.opacity(0.035)), lineWidth: 0.5)
+                ctx.stroke(gp, with: .color(.white.opacity(vgridO)), lineWidth: 0.5)
             }
 
             // Channel label (top-left) + current value (top-right, inside plot)

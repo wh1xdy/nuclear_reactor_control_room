@@ -17,7 +17,7 @@ struct PlantSnapshot {
     var thermalPowerW:      Double
     var electricPowerW:     Double
     var fuelTempK:          Double
-    var coolantTempK:       Double
+    var coolantTempK:       Double          // RCS T-avg = (T_hot + T_cold)/2
     var sgTempK:            Double
     var reactivity:         Double
     var xenonInventory:     Double
@@ -25,6 +25,11 @@ struct PlantSnapshot {
     var rodPosition:        Double
     var scrammed:           Bool
     var decayHeatFraction:  Double
+    // Two-node primary detail + saturation steam pressure (defaults keep older
+    // PlantSnapshot(...) constructions valid).
+    var hotLegTempK:        Double = 565
+    var coldLegTempK:       Double = 535
+    var steamPressureMPa:   Double = 1.9
 }
 
 final class PWRPlant {
@@ -54,7 +59,7 @@ final class PWRPlant {
         var rho = w * p.rodWorth
         if scrammed { rho += p.scramExtraWorth }
         rho += p.fuelTempCoeff    * (thermal.tFuel - p.nominalFuelTemp)
-        rho += p.coolantTempCoeff * (thermal.tCool - p.nominalCoolantTemp)
+        rho += p.coolantTempCoeff * (thermal.tAvg  - p.nominalCoolantTemp)
         rho += xenon.reactivity
         rho += p.externalReactivity
         return max(-0.9, min(p.betaTotal * 1.5, rho))
@@ -99,14 +104,17 @@ final class PWRPlant {
             thermalPowerW:     (kinetics.n * fissionShare + decayHeat.fraction) * p.nominalPower,
             electricPowerW:    ctrl.turbineTripped ? 0 : thermal.electricPower,
             fuelTempK:         thermal.tFuel,
-            coolantTempK:      thermal.tCool,
+            coolantTempK:      thermal.tAvg,
             sgTempK:           thermal.tSG,
             reactivity:        computeReactivity(ctrl),
             xenonInventory:    xenon.X,
             iodineInventory:   xenon.I,
             rodPosition:       rodPosEffective,
             scrammed:          scrammed,
-            decayHeatFraction: decayHeat.fraction
+            decayHeatFraction: decayHeat.fraction,
+            hotLegTempK:       thermal.tHot,
+            coldLegTempK:      thermal.tCold,
+            steamPressureMPa:  thermal.steamPressureMPa
         )
     }
 

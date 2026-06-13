@@ -16,24 +16,42 @@ struct PlantParams: Sendable {
     var nominalPower: Double = 3.0e9          // W (3000 MWt, typical PWR)
 
     // MARK: — Thermal capacities [J/K]
+    // Coolant is split into hot-leg (core outlet) and cold-leg (SG outlet)
+    // lumps so the loop carries a real ΔT and a transport delay.
     var fuelHeatCapacity: Double     = 1.0e8
-    var coolantHeatCapacity: Double  = 4.0e7
+    var hotLegCapacity: Double       = 2.0e7
+    var coldLegCapacity: Double      = 2.0e7
     var sgHeatCapacity: Double       = 1.0e8
 
     // MARK: — Heat transfer coefficients [W/K]
     // Calibrated so that at n=1.0, flow=1.0, turbine=1.0 the steady-state
-    // temperatures match the nominal values (T_fuel=900K, T_cool=550K, T_sg=490K):
-    //   h_FC = P_nom / (T_fuel − T_cool) = 3e9 / 350 = 8.57e6
-    //   h_CS = P_nom / (T_cool − T_sg)   = 3e9 / 60  = 5.0e7
-    //   h_ST = P_nom / (T_sg  − T_cond)  = 3e9 / 180 = 1.67e7
+    // temperatures match the nominal values (T_fuel=900K, T_avg=550K, T_sg=490K):
+    //   h_FC = P_nom / (T_fuel − T_avg) = 3e9 / 350 = 8.57e6
+    //   h_CS = P_nom / (T_avg  − T_sg)  = 3e9 / 60  = 5.0e7
+    //   h_ST = P_nom / (T_sg   − T_cond)= 3e9 / 180 = 1.67e7
+    // These are the CONVECTIVE coefficients; they scale with flow^0.8
+    // (Dittus–Boelter) in the model, not linearly.
     var hFuelToCoolant: Double   = 8.57e6
     var hCoolantToSG: Double     = 5.0e7
     var hSGToTurbine: Double     = 1.67e7
     // Condenser cold-side temperature (turbine exhaust sink) [K]
     var condenserTempK: Double   = 310.0
 
+    // Primary mass-advection conductance at flow=1 [W/K]. Sets the core ΔT:
+    // P_nom / advection = ΔT_core → 3e9 / 1e8 = 30 K. Advection ∝ ṁ (LINEAR),
+    // unlike the convective HTCs above.
+    var primaryAdvection: Double     = 1.0e8
+    var nominalCoreDeltaT: Double    = 30.0   // T_hot − T_cold at full power/flow [K]
+    // Loop transport delay at full flow [s] — coolant transit core→SG and back.
+    // Scales as 1/flow (slower coolant = longer transit).
+    var tauHotLeg: Double            = 4.0
+    var tauColdLeg: Double           = 4.0
+
     // MARK: — Turbine
-    var turbineEfficiency: Double = 0.33      // ~33% thermal efficiency
+    var turbineEfficiency: Double = 0.33      // ~33% thermal efficiency (legacy seed)
+    // Gross efficiency is Carnot-scaled: η = fraction·(1 − T_cond/T_sg). At
+    // nominal (T_sg=490, T_cond=310) this gives 0.9·0.367 ≈ 0.33.
+    var turbineCarnotFraction: Double = 0.9
 
     // MARK: — Control rod reactivity
     var rodWorth: Double        = -0.05       // Δk/k fully inserted

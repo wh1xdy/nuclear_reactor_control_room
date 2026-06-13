@@ -25,15 +25,17 @@ enum Theme {
     // MARK: — Background
     // Authentic runs a darker desk so the flat bordered panels read as raised.
     static var bg         : Color { isFlat ? Color(r: 6, g: 7, b: 9) : Color(r: 10, g: 12, b: 14) }
-    static let panel      = Color(r: 16,  g: 19,  b: 22)
-    static let panelHdr   = Color(r: 20,  g: 24,  b: 28)
-    static let border     = Color(r: 44,  g: 50,  b: 56)
-    static let sep        = Color(r: 30,  g: 34,  b: 38)
+    static var panel      : Color { isFlat ? Color(r: 18, g: 21, b: 25) : Color(r: 16, g: 19, b: 22) }
+    // Authentic: a clearly-lit DCS title bar, a visible steel grid border, and
+    // brighter separators so tables read as engineered grids, not soft cards.
+    static var panelHdr   : Color { isFlat ? Color(r: 34, g: 41, b: 49) : Color(r: 20, g: 24, b: 28) }
+    static var border     : Color { isFlat ? Color(r: 88, g: 99, b: 112) : Color(r: 44, g: 50, b: 56) }
+    static var sep        : Color { isFlat ? Color(r: 58, g: 67, b: 76) : Color(r: 30, g: 34, b: 38) }
 
     // MARK: — Text
-    static var text       : Color { isFlat ? Color(r: 228, g: 231, b: 224) : Color(r: 215, g: 218, b: 215) }
-    static let textDim    = Color(r: 85,  g: 94,  b: 88)
-    static let textHdr    = Color(r: 135, g: 145, b: 140)
+    static var text       : Color { isFlat ? Color(r: 230, g: 233, b: 226) : Color(r: 215, g: 218, b: 215) }
+    static var textDim    : Color { isFlat ? Color(r: 120, g: 132, b: 126) : Color(r: 85, g: 94, b: 88) }
+    static var textHdr    : Color { isFlat ? Color(r: 175, g: 188, b: 198) : Color(r: 135, g: 145, b: 140) }
 
     // MARK: — ISA status colors
     static let normal     = Color(r: 55,  g: 185, b: 75)    // green
@@ -57,8 +59,8 @@ enum Theme {
     // MARK: — Sizing
     // Guided uses squircle (.continuous) corners; authentic uses near-square
     // corners like a real DCS mimic. Both read the same token names.
-    static var panelRadius: CGFloat     { isFlat ? 3 : 16 }
-    static var controlRadius: CGFloat   { isFlat ? 2 : 12 }
+    static var panelRadius: CGFloat     { isFlat ? 0 : 16 }
+    static var controlRadius: CGFloat   { isFlat ? 0 : 12 }
     static let panelPadding: CGFloat    = 12
     static let headerHeight: CGFloat    = 44   // thin utility bar, not a billboard
     static let tabHeight: CGFloat       = 30
