@@ -31,8 +31,8 @@ struct TrendView: View {
             let plot = CGRect(x: 0.5, y: 0.5, width: W - axisW, height: H - 1)
 
             // Plot area + frame
-            ctx.fill(Path(plot), with: .color(.white.opacity(flat ? 0.02 : 0.03)))
-            ctx.stroke(Path(plot), with: .color(.white.opacity(frameO)), lineWidth: 1)
+            ctx.fill(Path(plot), with: .color(Theme.ink.opacity(flat ? 0.02 : 0.03)))
+            ctx.stroke(Path(plot), with: .color(Theme.ink.opacity(frameO)), lineWidth: 1)
 
             // Horizontal grid: 4 divisions, each labeled with ITS OWN value
             for i in 0...4 {
@@ -42,12 +42,12 @@ struct TrendView: View {
                     var gp = Path()
                     gp.move(to: .init(x: plot.minX + 1, y: y))
                     gp.addLine(to: .init(x: plot.maxX - 1, y: y))
-                    ctx.stroke(gp, with: .color(.white.opacity(gridO)), lineWidth: 0.5)
+                    ctx.stroke(gp, with: .color(Theme.ink.opacity(gridO)), lineWidth: 0.5)
                 }
                 var tick = Path()
                 tick.move(to: .init(x: plot.maxX, y: y))
                 tick.addLine(to: .init(x: plot.maxX + 3, y: y))
-                ctx.stroke(tick, with: .color(.white.opacity(tickO)), lineWidth: 1)
+                ctx.stroke(tick, with: .color(Theme.ink.opacity(tickO)), lineWidth: 1)
 
                 let v = yHi - (yHi - yLo) * Double(fy)
                 let ly = min(max(y, 5), H - 5)
@@ -63,7 +63,7 @@ struct TrendView: View {
                 var gp = Path()
                 gp.move(to: .init(x: x, y: plot.minY + 1))
                 gp.addLine(to: .init(x: x, y: plot.maxY - 1))
-                ctx.stroke(gp, with: .color(.white.opacity(vgridO)), lineWidth: 0.5)
+                ctx.stroke(gp, with: .color(Theme.ink.opacity(vgridO)), lineWidth: 0.5)
             }
 
             // Channel label (top-left) + current value (top-right, inside plot)
@@ -74,7 +74,7 @@ struct TrendView: View {
                 ctx.draw(
                     Text(axisStr(current))
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.white),
+                        .foregroundColor(Theme.ink),
                     at: CGPoint(x: plot.maxX - 5, y: plot.minY + 4), anchor: .topTrailing)
             }
 

@@ -19,7 +19,7 @@ struct HeaderBar: View {
                 HStack(spacing: 10) {
                     Text("UNIT 1")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.ink)
                     Text("PWR  3000 MWt")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Theme.textDim)
@@ -34,7 +34,7 @@ struct HeaderBar: View {
                             .foregroundStyle(Theme.accent)
                         Text(skin.label)
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Theme.ink)
                         Text("[M]")
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(Theme.textDim)
@@ -93,7 +93,7 @@ private struct SimClock: View {
                 .foregroundStyle(Theme.textDim)
             Text(clockString)
                 .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.ink)
         }
     }
 
@@ -121,7 +121,7 @@ private struct AlarmIndicator: View {
                         .shadow(color: Theme.alarm, radius: blink ? 6 : 2)
                     Text("REACTOR TRIP")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.ink)
                 }
                 .padding(.horizontal, 16)
                 .controlSurface(tint: Theme.alarm)
@@ -132,14 +132,14 @@ private struct AlarmIndicator: View {
                         .shadow(color: Theme.caution, radius: 4)
                     Text("ALARM ACTIVE")
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.ink)
                 }
                 .padding(.horizontal, 16)
                 .controlSurface(tint: Theme.caution)
             } else {
                 // Normal state stays quiet — no ISA green on a non-alarm condition.
                 HStack(spacing: 8) {
-                    Circle().fill(Color.white.opacity(0.35))
+                    Circle().fill(Theme.ink.opacity(0.35))
                         .frame(width: 7, height: 7)
                     Text("ALL SYSTEMS NORMAL")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))

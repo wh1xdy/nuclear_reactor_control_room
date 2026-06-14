@@ -93,7 +93,7 @@ private struct ElectricOutputPanel: View {
                 VStack(spacing: 2) {
                     Text(String(format: "%.1f", s.electricPowerW / 1e6))
                         .font(Theme.readoutXl)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.ink)
                     Text("MWe")
                         .font(Theme.readoutSm)
                         .foregroundStyle(Theme.textDim)

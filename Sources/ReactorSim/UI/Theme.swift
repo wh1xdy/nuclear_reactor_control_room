@@ -23,28 +23,38 @@ enum Theme {
     static var isFlat: Bool { skin == .authentic }
 
     // MARK: — Background
-    // Authentic runs a darker desk so the flat bordered panels read as raised.
-    static var bg         : Color { isFlat ? Color(r: 6, g: 7, b: 9) : Color(r: 10, g: 12, b: 14) }
-    static var panel      : Color { isFlat ? Color(r: 18, g: 21, b: 25) : Color(r: 16, g: 19, b: 22) }
-    // Authentic: a clearly-lit DCS title bar, a visible steel grid border, and
-    // brighter separators so tables read as engineered grids, not soft cards.
-    static var panelHdr   : Color { isFlat ? Color(r: 34, g: 41, b: 49) : Color(r: 20, g: 24, b: 28) }
-    static var border     : Color { isFlat ? Color(r: 88, g: 99, b: 112) : Color(r: 44, g: 50, b: 56) }
-    static var sep        : Color { isFlat ? Color(r: 58, g: 67, b: 76) : Color(r: 30, g: 34, b: 38) }
+    // GUIDED is the dark Liquid-Glass theme. AUTHENTIC is ISA-101 High-Performance
+    // HMI: a desaturated medium-gray desk with light-gray panels, near-black
+    // process text, and color RESERVED for alarms — exactly how a modern nuclear
+    // control room is mandated to look.
+    static var bg         : Color { isFlat ? Color(r: 126, g: 132, b: 138) : Color(r: 10, g: 12, b: 14) }
+    static var panel      : Color { isFlat ? Color(r: 178, g: 183, b: 188) : Color(r: 16, g: 19, b: 22) }
+    static var panelHdr   : Color { isFlat ? Color(r: 150, g: 156, b: 162) : Color(r: 20, g: 24, b: 28) }
+    static var border     : Color { isFlat ? Color(r: 92, g: 99, b: 107) : Color(r: 44, g: 50, b: 56) }
+    static var sep        : Color { isFlat ? Color(r: 120, g: 127, b: 134) : Color(r: 30, g: 34, b: 38) }
 
     // MARK: — Text
-    static var text       : Color { isFlat ? Color(r: 230, g: 233, b: 226) : Color(r: 215, g: 218, b: 215) }
-    static var textDim    : Color { isFlat ? Color(r: 120, g: 132, b: 126) : Color(r: 85, g: 94, b: 88) }
-    static var textHdr    : Color { isFlat ? Color(r: 175, g: 188, b: 198) : Color(r: 135, g: 145, b: 140) }
+    static var text       : Color { isFlat ? Color(r: 26, g: 30, b: 34) : Color(r: 215, g: 218, b: 215) }
+    static var textDim    : Color { isFlat ? Color(r: 74, g: 80, b: 86) : Color(r: 85, g: 94, b: 88) }
+    static var textHdr    : Color { isFlat ? Color(r: 40, g: 46, b: 52) : Color(r: 135, g: 145, b: 140) }
 
-    // MARK: — ISA status colors
-    static let normal     = Color(r: 55,  g: 185, b: 75)    // green
-    static let caution    = Color(r: 205, g: 160, b: 18)    // amber
+    /// Primary "ink" — bright foreground on dark (GUIDED) / dark ink on light
+    /// (AUTHENTIC). Replaces every hardcoded white so canvases invert correctly.
+    static var ink        : Color { isFlat ? Color(r: 26, g: 30, b: 34) : .white }
+    /// Equipment body fill and schematic field for the P&ID, per skin.
+    static var equipFill  : Color { isFlat ? Color(r: 196, g: 201, b: 206) : Color(r: 15, g: 17, b: 21) }
+    static var schematicBg: Color { isFlat ? Color(r: 162, g: 168, b: 174) : Color(r: 8, g: 11, b: 16) }
+
+    // MARK: — ISA status colors (saturated so they POP against ISA-101 gray)
+    static let normal     = Color(r: 40,  g: 150, b: 60)    // green
+    static var caution    : Color { isFlat ? Color(r: 200, g: 130, b: 0) : Color(r: 205, g: 160, b: 18) }   // amber
     static let warning    = Color(r: 195, g: 95,  b: 18)    // orange
-    static let alarm      = Color(r: 205, g: 38,  b: 38)    // red
+    static var alarm      : Color { isFlat ? Color(r: 196, g: 22, b: 22) : Color(r: 205, g: 38, b: 38) }    // red
 
-    // MARK: — Accent (electric blue)
-    static let accent     = Color(r: 48,  g: 144, b: 200)
+    // MARK: — Accent
+    // GUIDED: electric blue. AUTHENTIC: a muted dark slate — used for selection
+    // and for NORMAL process indication (grayscale philosophy; alarms own color).
+    static var accent     : Color { isFlat ? Color(r: 60, g: 76, b: 94) : Color(r: 48, g: 144, b: 200) }
 
     // MARK: — P&ID fluid colors
     static let water      = Color(r: 38,  g: 95,  b: 185)
@@ -144,7 +154,7 @@ extension View {
         case .guided:
             self.glassEffect(.clear, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
         case .authentic:
-            self.background(Color.white.opacity(0.025))
+            self.background(Color.black.opacity(0.05))
                 .clipShape(.rect(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)

@@ -69,10 +69,10 @@ struct BarMeterView: View {
                 ctx.fill(
                     Path(roundedRect: CGRect(x: barX, y: yTop, width: barW, height: span),
                          cornerRadius: trackR, style: .continuous),
-                    with: .color(.white.opacity(flat ? 0.09 : 0.06)))
+                    with: .color(Theme.ink.opacity(flat ? 0.09 : 0.06)))
                 if flat {
                     ctx.stroke(Path(CGRect(x: barX, y: yTop, width: barW, height: span)),
-                               with: .color(.white.opacity(0.20)), lineWidth: 1)
+                               with: .color(Theme.ink.opacity(0.20)), lineWidth: 1)
                 }
 
                 // Calibrated scale: 5 major ticks with values, minor ticks between
@@ -81,7 +81,7 @@ struct BarMeterView: View {
                     let y = yFor(v)
                     var p = Path()
                     p.move(to: .init(x: barX - 8, y: y)); p.addLine(to: .init(x: barX - 2, y: y))
-                    ctx.stroke(p, with: .color(.white.opacity(flat ? 0.5 : 0.35)), lineWidth: 1)
+                    ctx.stroke(p, with: .color(Theme.ink.opacity(flat ? 0.5 : 0.35)), lineWidth: 1)
                     ctx.draw(
                         Text(String(format: tickFormat, v))
                             .font(.system(size: 8, design: .monospaced))
@@ -92,7 +92,7 @@ struct BarMeterView: View {
                     let y = yFor(lo + (hi - lo) * Double(i) / 20)
                     var p = Path()
                     p.move(to: .init(x: barX - 5, y: y)); p.addLine(to: .init(x: barX - 2, y: y))
-                    ctx.stroke(p, with: .color(.white.opacity(flat ? 0.25 : 0.15)), lineWidth: 0.5)
+                    ctx.stroke(p, with: .color(Theme.ink.opacity(flat ? 0.25 : 0.15)), lineWidth: 0.5)
                 }
 
                 // Fill bar

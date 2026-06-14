@@ -18,7 +18,7 @@ struct PIDCanvas: View {
         }
         // No .drawingGroup(): offscreen Metal rasterization races the Liquid Glass
         // backdrop and causes flicker during window drag.
-        .background(Color(r: 8, g: 11, b: 16))
+        .background(Theme.schematicBg)
         .clipShape(.rect(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 
@@ -70,7 +70,7 @@ struct PIDCanvas: View {
 
         // Pressurizer surge line — plain line work, not a color of its own
         pipe(ctx, [(pz.midX, pz.maxY),
-                   (rv.midX, rv.minY + fy(0.05))], Color.white.opacity(0.25), w: 1.5)
+                   (rv.midX, rv.minY + fy(0.05))], Theme.ink.opacity(0.25), w: 1.5)
 
         // Main steam: SG right → horizontal run → TURB left
         pipe(ctx, [(sg.maxX, sg.minY + fy(0.10)),
@@ -139,14 +139,14 @@ struct PIDCanvas: View {
                                width: fy(0.05), height: rv.height - fy(0.16))
             // Channel guide
             ctx.stroke(Path(roundedRect: guide, cornerRadius: 2, style: .continuous),
-                       with: .color(.white.opacity(0.12)), lineWidth: 1)
+                       with: .color(Theme.ink.opacity(0.12)), lineWidth: 1)
             // Rod inserted from the top, depth = actual rod position
             let depth = guide.height * CGFloat(max(0, min(1, snap.rodPosition)))
             if depth > 1 {
                 ctx.fill(Path(roundedRect: CGRect(x: guide.minX + 1.5, y: guide.minY,
                                                   width: guide.width - 3, height: depth),
                               cornerRadius: 1.5, style: .continuous),
-                         with: .color(.white.opacity(0.45)))
+                         with: .color(Theme.ink.opacity(0.45)))
             }
         }
         drawLabel(ctx, snap.scrammed ? "REACTOR — TRIP" : "REACTOR", rect: rv, offsetY: fy(0.015),
@@ -215,7 +215,7 @@ struct PIDCanvas: View {
         for p in pts.dropFirst() { path.addLine(to: CGPoint(x: p.0, y: p.1)) }
         let style = StrokeStyle(lineWidth: 2, lineCap: .butt,
                                 dash: [3, 9], dashPhase: CGFloat(phase))
-        ctx.stroke(path, with: .color(.white.opacity(0.55)), style: style)
+        ctx.stroke(path, with: .color(Theme.ink.opacity(0.55)), style: style)
     }
 
     // Neutral equipment body: one fill, one hairline. `color` overrides the
@@ -223,8 +223,8 @@ struct PIDCanvas: View {
     private func drawBox(_ ctx: GraphicsContext, _ rect: CGRect,
                          label: String, color: Color?) {
         let shape = Path(roundedRect: rect, cornerRadius: 6, style: .continuous)
-        ctx.fill(shape, with: .color(Color(r: 15, g: 17, b: 21)))
-        ctx.stroke(shape, with: .color(color ?? .white.opacity(0.22)),
+        ctx.fill(shape, with: .color(Theme.equipFill))
+        ctx.stroke(shape, with: .color(color ?? Theme.ink.opacity(0.22)),
                    lineWidth: color == nil ? 1 : 1.5)
         if !label.isEmpty {
             ctx.draw(Text(label).font(.system(size: 11, design: .monospaced))
@@ -252,8 +252,8 @@ struct PIDCanvas: View {
     private func drawPump(_ ctx: GraphicsContext, center: CGPoint, r: CGFloat,
                           running: Bool) {
         let rect = CGRect(x: center.x-r, y: center.y-r, width: r*2, height: r*2)
-        ctx.fill(Path(ellipseIn: rect), with: .color(Color(r: 15, g: 17, b: 21)))
-        ctx.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.25)), lineWidth: 1)
+        ctx.fill(Path(ellipseIn: rect), with: .color(Theme.equipFill))
+        ctx.stroke(Path(ellipseIn: rect), with: .color(Theme.ink.opacity(0.25)), lineWidth: 1)
         var tri = Path()
         tri.move(to: CGPoint(x: center.x - r*0.40, y: center.y - r*0.50))
         tri.addLine(to: CGPoint(x: center.x - r*0.40, y: center.y + r*0.50))
@@ -262,7 +262,7 @@ struct PIDCanvas: View {
         if running {
             ctx.fill(tri, with: .color(Theme.accent.opacity(0.85)))
         } else {
-            ctx.stroke(tri, with: .color(.white.opacity(0.30)), lineWidth: 1)
+            ctx.stroke(tri, with: .color(Theme.ink.opacity(0.30)), lineWidth: 1)
         }
     }
 }

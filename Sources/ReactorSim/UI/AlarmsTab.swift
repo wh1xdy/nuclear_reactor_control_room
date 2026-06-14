@@ -137,7 +137,7 @@ private struct AnnunciatorTile: View {
     let blink: Bool
 
     private var fill: Color {
-        guard window.active else { return Color.white.opacity(0.035) }
+        guard window.active else { return Theme.ink.opacity(0.035) }
         let base = window.trip ? Theme.alarm : Theme.caution
         if window.unack { return base.opacity(blink ? 0.95 : 0.45) }
         return base.opacity(0.75)
@@ -145,7 +145,7 @@ private struct AnnunciatorTile: View {
 
     private var textColor: Color {
         if window.active { return .white }
-        return Color.white.opacity(window.label == "SPARE" ? 0.15 : 0.30)
+        return Theme.ink.opacity(window.label == "SPARE" ? 0.15 : 0.30)
     }
 
     var body: some View {

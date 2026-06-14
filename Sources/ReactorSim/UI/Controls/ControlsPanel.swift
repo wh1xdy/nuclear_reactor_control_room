@@ -167,7 +167,7 @@ struct DCSSlider: View {
                 Spacer()
                 Text(displayStr(value))
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.ink)
             }
             GeometryReader { geo in
                 let w = geo.size.width
@@ -175,15 +175,16 @@ struct DCSSlider: View {
                     ZStack(alignment: .leading) {
                         // Groove
                         Capsule()
-                            .fill(Color.black.opacity(0.45))
+                            .fill(Color.black.opacity(Theme.isFlat ? 0.28 : 0.45))
                             .frame(height: 3)
                         // Fill up to handle
                         Capsule()
-                            .fill(color.opacity(0.55))
+                            .fill(color.opacity(Theme.isFlat ? 0.9 : 0.55))
                             .frame(width: max(0, (w - thumbW) * value + thumbW / 2), height: 3)
-                        // Fader handle: rectangle with index notch
+                        // Fader handle: rectangle with index notch — dark on the
+                        // light ISA-101 console, light on the dark glass console.
                         RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(Color(white: 0.82))
+                            .fill(Theme.isFlat ? Color(r: 58, g: 64, b: 70) : Color(white: 0.82))
                             .frame(width: thumbW, height: thumbH)
                             .overlay(
                                 Rectangle()
@@ -200,7 +201,7 @@ struct DCSSlider: View {
                             var p = Path()
                             p.move(to: .init(x: x, y: 0))
                             p.addLine(to: .init(x: x, y: major ? size.height : size.height * 0.5))
-                            ctx.stroke(p, with: .color(.white.opacity(major ? 0.30 : 0.14)),
+                            ctx.stroke(p, with: .color(Theme.ink.opacity(major ? 0.30 : 0.14)),
                                        lineWidth: 1)
                         }
                     }
@@ -231,7 +232,7 @@ struct ToggleButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(state ? statusColor : Color.white.opacity(0.2))
+                    .fill(state ? statusColor : Theme.ink.opacity(0.2))
                     .frame(width: 6, height: 6)
                     .shadow(color: state ? statusColor : .clear, radius: 4)
                 Text(label)
@@ -266,14 +267,14 @@ struct ScramButton: View {
                 if supervisor.scrammed {
                     Text("⚠  SCRAM ACTIVE")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.ink)
                     Text("tap to reset")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(Theme.ink.opacity(0.6))
                 } else {
                     Text("SCRAM")
                         .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.ink)
                 }
             }
             .frame(maxWidth: .infinity)
