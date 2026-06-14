@@ -128,6 +128,40 @@ final class ThermalHydraulicsTests: XCTestCase {
 }
 
 @MainActor
+final class AutomationTests: XCTestCase {
+
+    private func allAuto(_ s: PlantSupervisor) {
+        s.rodAutoEnabled = true; s.fwAutoEnabled = true; s.pzrAutoEnabled = true
+    }
+
+    /// MASTER AUTO at full power must hold the plant hands-off: T-avg pinned,
+    /// power steady, no drift, no spurious trips. (The "constant adjustments"
+    /// complaint should only apply in MANUAL.)
+    func testMasterAutoHoldsSteady() {
+        let sup = PlantSupervisor()
+        allAuto(sup)
+        for _ in 0..<900 { sup.step(dt: 1.0) }                 // 15 min hands-off
+        XCTAssertEqual(sup.snapshot.coolantTempK, 550, accuracy: 2.5, "T-avg drifted")
+        XCTAssertEqual(sup.snapshot.powerFraction, 1.0, accuracy: 0.04, "power drifted")
+        XCTAssertTrue(sup.trips.isEmpty, "unexpected trips: \(sup.trips)")
+    }
+
+    /// Turbine-following: with rods on AUTO, cutting turbine load makes the
+    /// reactor follow it down (T-avg restored) without a trip.
+    func testRodAutoFollowsTurbineLoad() {
+        let sup = PlantSupervisor()
+        allAuto(sup)
+        for _ in 0..<120 { sup.step(dt: 1.0) }                 // settle
+        sup.turbineValve = 0.6                                 // drop to 60% load
+        for _ in 0..<1200 { sup.step(dt: 1.0) }                // 20 min to follow
+        XCTAssertEqual(sup.snapshot.coolantTempK, 550, accuracy: 6, "T-avg not restored")
+        XCTAssertLessThan(sup.snapshot.powerFraction, 0.80, "reactor didn't follow load down")
+        XCTAssertGreaterThan(sup.snapshot.powerFraction, 0.40, "reactor overshot down")
+        XCTAssertTrue(sup.trips.isEmpty, "unexpected trips: \(sup.trips)")
+    }
+}
+
+@MainActor
 final class SupervisorTests: XCTestCase {
 
     /// BOP must stay stable and balanced at 600× time compression

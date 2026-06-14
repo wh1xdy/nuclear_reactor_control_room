@@ -27,6 +27,7 @@ struct TrendView: View {
         let tickO  = flat ? 0.42 : 0.25
         Canvas { ctx, size in
             let W = size.width; let H = size.height
+            let compact = H < 70          // mini-trend: only label top & bottom
             let axisW: CGFloat = 38
             let plot = CGRect(x: 0.5, y: 0.5, width: W - axisW, height: H - 1)
 
@@ -49,6 +50,7 @@ struct TrendView: View {
                 tick.addLine(to: .init(x: plot.maxX + 3, y: y))
                 ctx.stroke(tick, with: .color(Theme.ink.opacity(tickO)), lineWidth: 1)
 
+                if compact && i != 0 && i != 4 { continue }   // skip middle labels when tiny
                 let v = yHi - (yHi - yLo) * Double(fy)
                 let ly = min(max(y, 5), H - 5)
                 ctx.draw(

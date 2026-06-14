@@ -16,6 +16,20 @@ struct ContentView: View {
     // static design tokens resolve correctly; .id(skin) rebuilds the tree on switch.
     @AppStorage("reactorSkin") private var skinRaw = Skin.guided.rawValue
     private var skin: Skin { Skin(rawValue: skinRaw) ?? .guided }
+    private var skinBinding: Binding<Skin> {
+        Binding(get: { skin }, set: { skinRaw = $0.rawValue })
+    }
+
+    // Selected operator console + reactor type (persisted).
+    @AppStorage("console") private var consoleRaw = Console.mimic.rawValue
+    private var console: Binding<Console> {
+        Binding(get: { Console(rawValue: consoleRaw) ?? .mimic }, set: { consoleRaw = $0.rawValue })
+    }
+    @AppStorage("reactorType") private var reactorRaw = ReactorType.pwr.rawValue
+    private var reactor: Binding<ReactorType> {
+        Binding(get: { ReactorType(rawValue: reactorRaw) ?? .pwr }, set: { reactorRaw = $0.rawValue })
+    }
+    @State private var showSettings = false
 
     private let speeds = [1, 10, 60, 600]
 
@@ -44,34 +58,27 @@ struct ContentView: View {
 
     private var layout: some View {
         VStack(spacing: 0) {
-            HeaderBar(supervisor: supervisor, timeSpeed: timeSpeed,
-                      skin: skin, onSpeedCycle: cycleSpeed, onSkinToggle: toggleSkin)
-                .frame(height: Theme.headerHeight)
+            SystemBar(supervisor: supervisor, timeSpeed: timeSpeed, console: console,
+                      onSpeedCycle: cycleSpeed, onOpenSettings: { showSettings = true })
+                .frame(height: 36)
+            Divider().background(Theme.sep)
 
-            TabBar(activeTab: $activeTab)
-                .frame(height: Theme.tabHeight)
-
-            HStack(spacing: 0) {
-                ControlsPanel(supervisor: supervisor)
-                    .frame(width: Theme.controlsWidth)
-
-                tabContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            consoleView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(console: console, skin: skinBinding, reactor: reactor,
+                         onClose: { showSettings = false })
         }
     }
 
     @ViewBuilder
-    private var tabContent: some View {
-        switch activeTab {
-        case 0: OverviewTab(supervisor: supervisor)
-        case 1: PrimaryTab(supervisor: supervisor)
-        case 2: SecondaryTab(supervisor: supervisor)
-        case 3: ReactivityTab(supervisor: supervisor)
-        case 4: AlarmsTab(supervisor: supervisor)
-        case 5: ICTab(supervisor: supervisor)
-        default: EmptyView()
+    private var consoleView: some View {
+        switch console.wrappedValue {
+        case .mimic:       MimicConsole(supervisor: supervisor)
+        case .workstation: WorkstationConsole(supervisor: supervisor)
+        case .benchboard:  BenchboardConsole(supervisor: supervisor)
+        case .dashboard:   DashboardConsole(supervisor: supervisor, activeTab: $activeTab)
         }
     }
 
@@ -131,6 +138,7 @@ struct ContentView: View {
         case "z": supervisor.pumpDegraded   = !supervisor.pumpDegraded
         case "x": supervisor.feedwaterFault = !supervisor.feedwaterFault
         case "m": toggleSkin()
+        case ",": showSettings.toggle()
         case "c": supervisor.acknowledgeAllAlarms()
         case "l": supervisor.resetScram()
         case "r": supervisor = PlantSupervisor(); startPhysics()

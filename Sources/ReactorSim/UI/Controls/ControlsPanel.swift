@@ -175,16 +175,16 @@ struct DCSSlider: View {
                     ZStack(alignment: .leading) {
                         // Groove
                         Capsule()
-                            .fill(Color.black.opacity(Theme.isFlat ? 0.28 : 0.45))
+                            .fill(Color.black.opacity(Theme.isLight ? 0.28 : 0.45))
                             .frame(height: 3)
                         // Fill up to handle
                         Capsule()
-                            .fill(color.opacity(Theme.isFlat ? 0.9 : 0.55))
+                            .fill(color.opacity(Theme.isLight ? 0.9 : 0.6))
                             .frame(width: max(0, (w - thumbW) * value + thumbW / 2), height: 3)
-                        // Fader handle: rectangle with index notch — dark on the
-                        // light ISA-101 console, light on the dark glass console.
+                        // Fader handle: dark handle only on the LIGHT console,
+                        // light handle on both dark consoles.
                         RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(Theme.isFlat ? Color(r: 58, g: 64, b: 70) : Color(white: 0.82))
+                            .fill(Theme.isLight ? Color(r: 58, g: 64, b: 70) : Color(white: 0.82))
                             .frame(width: thumbW, height: thumbH)
                             .overlay(
                                 Rectangle()

@@ -4,57 +4,73 @@
 import SwiftUI
 
 // MARK: — Skin
-// Two visual identities the operator can switch between at runtime:
-//  • .guided    — Liquid Glass, softer corners, beginner-friendly. The "premium" look.
-//  • .authentic — flat panels, hard 1px borders, sharp corners. Real-DCS look.
-// `Theme.skin` is a plain static var; ContentView mirrors the user's choice into
-// it and re-keys the view tree (.id(skin)) so every surface rebuilds on switch.
+// Three visual identities the operator can switch between at runtime:
+//  • .guided        — Liquid Glass, soft squircles, dark. The "premium" look.
+//  • .authentic     — flat ISA-101 High-Performance HMI, LIGHT desaturated gray.
+//  • .authenticDark — the same flat ISA-101 layout on a DARK desk.
+// `isFlat` (surfaces/corners) is true for both authentic variants; `isLight`
+// (palette) is true only for the light one — so guided and authenticDark share
+// the dark palette and differ only in glass-vs-flat surface treatment.
 enum Skin: String, CaseIterable {
     case guided
     case authentic
+    case authenticDark
 
-    var label: String { self == .guided ? "GUIDED" : "AUTHENTIC" }
-    var next: Skin { self == .guided ? .authentic : .guided }
+    var label: String {
+        switch self {
+        case .guided:        return "GUIDED"
+        case .authentic:     return "AUTHENTIC LIGHT"
+        case .authenticDark: return "AUTHENTIC DARK"
+        }
+    }
+    var next: Skin {
+        switch self {
+        case .guided:        return .authentic
+        case .authentic:     return .authenticDark
+        case .authenticDark: return .guided
+        }
+    }
 }
 
 enum Theme {
     // Active skin — set once by ContentView before the tree builds.
     static var skin: Skin = .guided
-    static var isFlat: Bool { skin == .authentic }
+    static var isFlat:  Bool { skin != .guided }       // flat surfaces + square corners
+    static var isLight: Bool { skin == .authentic }    // light ISA-101 palette
 
     // MARK: — Background
     // GUIDED is the dark Liquid-Glass theme. AUTHENTIC is ISA-101 High-Performance
     // HMI: a desaturated medium-gray desk with light-gray panels, near-black
     // process text, and color RESERVED for alarms — exactly how a modern nuclear
     // control room is mandated to look.
-    static var bg         : Color { isFlat ? Color(r: 126, g: 132, b: 138) : Color(r: 10, g: 12, b: 14) }
-    static var panel      : Color { isFlat ? Color(r: 178, g: 183, b: 188) : Color(r: 16, g: 19, b: 22) }
-    static var panelHdr   : Color { isFlat ? Color(r: 150, g: 156, b: 162) : Color(r: 20, g: 24, b: 28) }
-    static var border     : Color { isFlat ? Color(r: 92, g: 99, b: 107) : Color(r: 44, g: 50, b: 56) }
-    static var sep        : Color { isFlat ? Color(r: 120, g: 127, b: 134) : Color(r: 30, g: 34, b: 38) }
+    static var bg         : Color { isLight ? Color(r: 126, g: 132, b: 138) : Color(r: 10, g: 12, b: 14) }
+    static var panel      : Color { isLight ? Color(r: 178, g: 183, b: 188) : Color(r: 16, g: 19, b: 22) }
+    static var panelHdr   : Color { isLight ? Color(r: 150, g: 156, b: 162) : Color(r: 20, g: 24, b: 28) }
+    static var border     : Color { isLight ? Color(r: 92, g: 99, b: 107) : Color(r: 44, g: 50, b: 56) }
+    static var sep        : Color { isLight ? Color(r: 120, g: 127, b: 134) : Color(r: 30, g: 34, b: 38) }
 
     // MARK: — Text
-    static var text       : Color { isFlat ? Color(r: 26, g: 30, b: 34) : Color(r: 215, g: 218, b: 215) }
-    static var textDim    : Color { isFlat ? Color(r: 74, g: 80, b: 86) : Color(r: 85, g: 94, b: 88) }
-    static var textHdr    : Color { isFlat ? Color(r: 40, g: 46, b: 52) : Color(r: 135, g: 145, b: 140) }
+    static var text       : Color { isLight ? Color(r: 26, g: 30, b: 34) : Color(r: 215, g: 218, b: 215) }
+    static var textDim    : Color { isLight ? Color(r: 74, g: 80, b: 86) : Color(r: 85, g: 94, b: 88) }
+    static var textHdr    : Color { isLight ? Color(r: 40, g: 46, b: 52) : Color(r: 135, g: 145, b: 140) }
 
-    /// Primary "ink" — bright foreground on dark (GUIDED) / dark ink on light
-    /// (AUTHENTIC). Replaces every hardcoded white so canvases invert correctly.
-    static var ink        : Color { isFlat ? Color(r: 26, g: 30, b: 34) : .white }
+    /// Primary "ink" — bright foreground on dark / dark ink on the light skin.
+    /// Replaces every hardcoded white so canvases invert correctly.
+    static var ink        : Color { isLight ? Color(r: 26, g: 30, b: 34) : .white }
     /// Equipment body fill and schematic field for the P&ID, per skin.
-    static var equipFill  : Color { isFlat ? Color(r: 196, g: 201, b: 206) : Color(r: 15, g: 17, b: 21) }
-    static var schematicBg: Color { isFlat ? Color(r: 162, g: 168, b: 174) : Color(r: 8, g: 11, b: 16) }
+    static var equipFill  : Color { isLight ? Color(r: 196, g: 201, b: 206) : Color(r: 15, g: 17, b: 21) }
+    static var schematicBg: Color { isLight ? Color(r: 162, g: 168, b: 174) : Color(r: 8, g: 11, b: 16) }
 
-    // MARK: — ISA status colors (saturated so they POP against ISA-101 gray)
+    // MARK: — ISA status colors (saturated so they POP against the desk)
     static let normal     = Color(r: 40,  g: 150, b: 60)    // green
-    static var caution    : Color { isFlat ? Color(r: 200, g: 130, b: 0) : Color(r: 205, g: 160, b: 18) }   // amber
+    static var caution    : Color { isLight ? Color(r: 200, g: 130, b: 0) : Color(r: 205, g: 160, b: 18) }   // amber
     static let warning    = Color(r: 195, g: 95,  b: 18)    // orange
-    static var alarm      : Color { isFlat ? Color(r: 196, g: 22, b: 22) : Color(r: 205, g: 38, b: 38) }    // red
+    static var alarm      : Color { isLight ? Color(r: 196, g: 22, b: 22) : Color(r: 205, g: 38, b: 38) }    // red
 
     // MARK: — Accent
-    // GUIDED: electric blue. AUTHENTIC: a muted dark slate — used for selection
-    // and for NORMAL process indication (grayscale philosophy; alarms own color).
-    static var accent     : Color { isFlat ? Color(r: 60, g: 76, b: 94) : Color(r: 48, g: 144, b: 200) }
+    // Light ISA-101 uses a muted dark slate (grayscale philosophy). The dark
+    // skins (guided + authenticDark) keep the electric blue.
+    static var accent     : Color { isLight ? Color(r: 60, g: 76, b: 94) : Color(r: 48, g: 144, b: 200) }
 
     // MARK: — P&ID fluid colors
     static let water      = Color(r: 38,  g: 95,  b: 185)
@@ -138,7 +154,7 @@ extension View {
         case .guided:
             self.glassEffect(.regular,
                              in: .rect(cornerRadius: Theme.panelRadius, style: .continuous))
-        case .authentic:
+        case .authentic, .authenticDark:
             self.background(Theme.panel)
                 .clipShape(.rect(cornerRadius: Theme.panelRadius, style: .continuous))
                 .overlay(
@@ -153,8 +169,8 @@ extension View {
         switch Theme.skin {
         case .guided:
             self.glassEffect(.clear, in: .rect(cornerRadius: Theme.controlRadius, style: .continuous))
-        case .authentic:
-            self.background(Color.black.opacity(0.05))
+        case .authentic, .authenticDark:
+            self.background(Theme.ink.opacity(0.06))
                 .clipShape(.rect(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
@@ -182,7 +198,7 @@ extension View {
                 self.glassEffect(.regular.interactive(),
                                  in: .rect(cornerRadius: r, style: .continuous))
             }
-        case .authentic:
+        case .authentic, .authenticDark:
             self.background(tint == nil ? AnyShapeStyle(Theme.panelHdr)
                                         : AnyShapeStyle(tint!.opacity(0.22)))
                 .clipShape(.rect(cornerRadius: r, style: .continuous))
