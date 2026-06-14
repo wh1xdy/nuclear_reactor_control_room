@@ -46,7 +46,7 @@ struct ArcGaugeView: View {
             let a0 = Angle.degrees(startDeg - Double(i)   * sweepDeg / Double(nSegs))
             let a1 = Angle.degrees(startDeg - Double(i+1) * sweepDeg / Double(nSegs))
             ctx.fill(arcSegPath(cx: cx, cy: cy, rO: rOuter, rI: rInner, a0: a0, a1: a1),
-                     with: .color(.white.opacity(flat ? 0.11 : 0.07)))
+                     with: .color(Theme.ink.opacity(flat ? 0.11 : 0.07)))
         }
 
         // Filled arc up to current value — accent normally; amber/red only in the
@@ -75,7 +75,7 @@ struct ArcGaugeView: View {
             let x1 = cx + (rOuter + 7) * cos(a.radians)
             let y1 = cy - (rOuter + 7) * sin(a.radians)
             var p = Path(); p.move(to: .init(x: x0, y: y0)); p.addLine(to: .init(x: x1, y: y1))
-            ctx.stroke(p, with: .color(.white.opacity(flat ? 0.5 : 0.35)), lineWidth: 1)
+            ctx.stroke(p, with: .color(Theme.ink.opacity(flat ? 0.5 : 0.35)), lineWidth: 1)
             let lx = cx + (rOuter + 14) * cos(a.radians)
             let ly = cy - (rOuter + 14) * sin(a.radians)
             ctx.draw(
@@ -91,7 +91,7 @@ struct ArcGaugeView: View {
             let x1 = cx + (rOuter + 5) * cos(a.radians)
             let y1 = cy - (rOuter + 5) * sin(a.radians)
             var p = Path(); p.move(to: .init(x: x0, y: y0)); p.addLine(to: .init(x: x1, y: y1))
-            ctx.stroke(p, with: .color(.white.opacity(flat ? 0.25 : 0.15)), lineWidth: 0.5)
+            ctx.stroke(p, with: .color(Theme.ink.opacity(flat ? 0.25 : 0.15)), lineWidth: 0.5)
         }
 
         // Trip line
@@ -113,7 +113,7 @@ struct ArcGaugeView: View {
         needle.move(to: CGPoint(x: cx, y: cy))
         needle.addLine(to: CGPoint(x: cx + rTip * cos(needleA.radians),
                                    y: cy - rTip * sin(needleA.radians)))
-        ctx.stroke(needle, with: .color(.white.opacity(0.9)), lineWidth: 2)
+        ctx.stroke(needle, with: .color(Theme.ink.opacity(0.9)), lineWidth: 2)
         ctx.fill(Path(ellipseIn: CGRect(x: cx-5, y: cy-5, width: 10, height: 10)),
                  with: .color(Color(r: 40, g: 50, b: 72)))
         ctx.fill(Path(ellipseIn: CGRect(x: cx-3, y: cy-3, width: 6, height: 6)),

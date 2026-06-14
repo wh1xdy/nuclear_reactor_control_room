@@ -41,7 +41,7 @@ private struct ReactivityBudgetPanel: View {
         let rhoTot  = s.reactivity
 
         // Restrained palette: total in accent, components in neutral grey.
-        let grey = Color.white.opacity(0.55)
+        let grey = Theme.ink.opacity(0.55)
         let components: [(String, Double, Color)] = [
             ("Total",          rhoTot,  Theme.accent),
             ("Rod position",   rhoRods, grey),
@@ -69,10 +69,10 @@ private struct ReactivityBudgetPanel: View {
 
                 // Field frame + zero line
                 ctx.stroke(Path(CGRect(x: fieldX0, y: 6, width: fieldX1 - fieldX0, height: H - 12)),
-                           with: .color(.white.opacity(0.08)), lineWidth: 1)
+                           with: .color(Theme.ink.opacity(0.08)), lineWidth: 1)
                 var zl = Path()
                 zl.move(to: .init(x: zeroX, y: 6)); zl.addLine(to: .init(x: zeroX, y: H - 6))
-                ctx.stroke(zl, with: .color(.white.opacity(0.25)), lineWidth: 1)
+                ctx.stroke(zl, with: .color(Theme.ink.opacity(0.25)), lineWidth: 1)
 
                 for (i, (name, val, color)) in components.enumerated() {
                     let yMid = 8 + CGFloat(i) * rowH + rowH / 2
@@ -139,7 +139,7 @@ private struct RodWorthCurvePanel: View {
                 var axes = Path()
                 axes.move(to: .init(x: pad, y: pad)); axes.addLine(to: .init(x: pad, y: H - pad))
                 axes.move(to: .init(x: pad, y: H - pad)); axes.addLine(to: .init(x: W - pad, y: H - pad))
-                ctx.stroke(axes, with: .color(.white.opacity(0.15)), lineWidth: 1)
+                ctx.stroke(axes, with: .color(Theme.ink.opacity(0.15)), lineWidth: 1)
 
                 // S-curve: w(x) = 3x²-2x³, worth = w * rod_worth
                 var curve = Path()
@@ -165,7 +165,7 @@ private struct RodWorthCurvePanel: View {
                          with: .color(Theme.accent))
                 let steps = Int((228 * (1 - rodPos)).rounded())
                 ctx.draw(
-                    Text("\(steps) SWD").font(Theme.readoutSm).foregroundColor(.white),
+                    Text("\(steps) SWD").font(Theme.readoutSm).foregroundColor(Theme.ink),
                     at: .init(x: rodPos > 0.72 ? mpx - 10 : mpx + 10, y: mpy),
                     anchor: rodPos > 0.72 ? .trailing : .leading
                 )
