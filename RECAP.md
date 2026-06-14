@@ -2,80 +2,77 @@
 
 **Project:** Native macOS SwiftUI nuclear reactor (PWR) training simulator.
 **Dir:** `/Users/alexanderwessbladhardh/kärnreaktor/ReactorSim/`
-**Build:** `swift build` (debug) / `swift build -c release` (use release for 600× speed).
-**Test:** `swift test` — 9 headless physics tests, all passing (2026-06-11).
+**Repo:** github.com/wh1xdy/nuclear_reactor_control_room (branch `macos-swift`).
+**Build:** `swift build` (debug) / `swift build -c release` (release for 600× speed).
+**Test:** `swift test` — 16 headless tests, all passing (2026-06-15).
+**Run:** `swift run ReactorSim`. macOS 26 (Tahoe) required for Liquid Glass.
 
 ---
 
-## Design (locked in)
+## Architecture
 
-Gorgeous, minimalistic, native Apple polish: Liquid Glass, 120 Hz, squircles.
-1. **Pure clean glass** — no scanlines, no grid, no corner brackets. ✅ DONE
-2. **Spacious** — fewer elements, larger instruments, breathing room. ✅ DONE
-3. **Restrained color** — white/grey text; electric blue accent ONLY for
-   active/selected; ISA green/amber/red ONLY on live alarm/trip. ✅ DONE
+One physics model (`PlantSupervisor` → `PWRPlant`) drives several swappable
+**operator consoles**, chosen in **Settings** (gear in the system bar, or `,`)
+and persisted via `@AppStorage`. `ContentView` is a thin router: a global
+`SystemBar` (nameplate, sim clock, alarm state, **ACK ALL**, console switcher,
+gear) over the selected console.
 
-### Redesign checklist — COMPLETE (2026-06-11)
-- [x] Deleted `ScanlineOverlay`, `GridBackground`, `CornerBrackets`.
-- [x] Removed every `.drawingGroup()` (flicker root cause — offscreen Metal
-      texture races the Liquid Glass backdrop).
-- [x] Squircles everywhere: `.rect(cornerRadius:style:.continuous)`.
-- [x] Consistent radii: `Theme.panelRadius=16`, `Theme.controlRadius=12`.
-- [x] No hard 1px strokes — glass edges define panels.
-      (Exception kept: alarm tiles use ISA color FILLS, which is semantic.)
-- [x] Restrained color: `Theme.powerStatus`/`reactivityStatus` return white in
-      normal range; instruments fill accent-blue, amber/red only in abnormal
-      bands; trend lines all accent; "ALL SYSTEMS NORMAL" is grey, not green.
-- [x] Render-scope isolation: `SimClock` leaf in HeaderBar; `PIDCanvas` reads
-      `supervisor.snapshot` itself — parent glass panels don't re-eval at 60 Hz.
-- [x] Physics timer steps inline via `MainActor.assumeIsolated` — the old
-      `Task { @MainActor }` hop queued on the main dispatch queue, which stalls
-      during event tracking (would freeze physics during drags).
+### Consoles (`Sources/ReactorSim/UI/Consoles/`)
+- **Plant Mimic** (`MimicConsole` + `MimicDiagram`) — full-screen PWR schematic:
+  vessel + core/rods, pressurizer (level + PORV), SG (secondary level), hot/cold
+  legs, RCP, MSIV, HP/LP turbine, generator, condenser, feed train; live values
+  embedded; alarm banner; control strip with **per-loop A/M stations**.
+- **DCS Workstation** (`WorkstationConsole`) — tiled 4-pane: alarm summary,
+  mimic, 4-pen trend group, control faceplates (SP/PV/OUT).
+- **Hardware Benchboard** (`BenchboardConsole`) — annunciator lamp wall, bezeled
+  round gauges, strip recorders, hand switches, SCRAM.
+- **Engineering Dashboard** (`DashboardConsole`) — the original F1–F6 tabbed
+  layout (Overview/Primary/Secondary/Reactivity/Alarms/I&C) + left control panel.
 
----
+### Skins (`Theme.skin`, cycle with `M`)
+- **GUIDED** — Liquid Glass, dark, soft squircles.
+- **AUTHENTIC LIGHT** — flat ISA-101 High-Performance HMI, light desaturated gray.
+- **AUTHENTIC DARK** — same flat ISA-101 layout on a dark desk.
 
-## Physics — verified by `swift test` (Tests/ReactorSimTests/PhysicsTests.swift)
+`Theme.isFlat` (flat surfaces + square corners) is true for both authentic
+variants; `Theme.isLight` (palette) only for the light one — so guided and
+authentic-dark share the dark palette, differing only in glass-vs-flat surfaces.
+Every panel routes through `panelSurface()` / `controlSurface()` /
+`readoutSurface()`; every former hardcoded white goes through `Theme.ink` so
+canvases invert correctly between light and dark.
 
-- **Point kinetics:** six-group RK2, adaptive substepping with an explicit
-  stability bound (`|ρ−β|/Λ·subDt ≤ 0.5`), plus a **prompt-jump fast path**
-  for deep shutdown (n slaved to precursor source — O(1) instead of ~900
-  substeps when scrammed).
-- **Decay heat:** full **ANS-5.1 23-group** model, exact exponential update
-  (stable at any dt). Builds toward ~6.5% during operation, decays along the
-  ANS curve after shutdown. Rated power = fission share (93.5%) + decay share;
-  `powerFraction` reports total thermal (reads 100% at steady full power).
-- **Rod motion:** CRDM rate-limited at 0.0053/s (~3 min full travel) — rods
-  walk toward demand, never teleport. Scram reset syncs demand to actual
-  position (rods stay in until deliberately withdrawn).
-- **Scram interlocks:** turbine auto-trips on scram; condenser **steam dump**
-  (proportional valve) holds no-load T_avg ≈ 550 K post-trip; tripped turbine
-  generates 0 MWe.
-- **BOP:** steam/feedwater inventories balance at steady state (steam balance
-  self-regulating); condenser + pressurizer ODEs solved exactly (600×-stable);
-  pressurizer coupling asymmetric (0.05 MPa/K overheat → 17.0 MPa HIGH_PRESS
-  trip reachable; 0.01 MPa/K cooldown — heaters hold pressure, no spurious
-  ECCS post-scram).
-- **Alarms:** annunciator latching — cleared conditions stay on the board
-  until acknowledged; trips block scram reset until acked.
-- `internalDt = 0.05 s` (coolant node τ ≈ 0.7 s ⇒ 14× margin); use a release
-  build for smooth 600× time compression.
+## Controls / automation
+- Per-loop **AUTO/MANUAL stations** on ROD and FW (real A/M stations); dragging a
+  fader drops it to MANUAL. **MASTER AUTO** engages rod + feedwater + pressurizer.
+- Turbine-following: with rods on AUTO the reactor follows turbine load and holds
+  T-avg = 550 K hands-off (verified by `AutomationTests`). Manual = you babysit it.
+- Global **ACK ALL** in the system bar (works in every console; `C` key too).
 
-## Xenon startup
-Fresh core (X=0, I=0), critical at rod 0 / boron 800 ppm. Xenon builds over
-6–8 sim-hours; equilibrium worth ≈ −2500 pcm — operator compensates by boron
-dilution (rods alone can't add positive reactivity). Decay heat also builds
-from zero (fresh fuel), so the core self-adjusts slightly via temperature
-feedback in the first hours — intentional realism, total thermal stays ~100%.
+## Physics (`Sources/ReactorSim/Physics/`)
+- **PointKinetics** — six-group U-235 delayed neutrons (β≈650 pcm, Keepin λ's,
+  Λ=20 µs), RK2 with adaptive substepping + prompt-jump fast path.
+- **DecayHeat** — full ANS/ANSI-5.1 23-group, exact exponential integrator,
+  ~6.5% equilibrium.
+- **XenonIodine** — standard I-135/Xe-135 two-ODE poison model.
+- **ThermalHydraulics** — TWO-node primary loop (hot leg / cold leg) with a
+  ~30 K core ΔT and a transport-delay lag (~4 s/leg, ∝1/flow); Dittus-Boelter
+  (convective HTC ∝ flow^0.8, advection linear in flow); saturation steam
+  pressure (Antoine); Carnot-scaled gross efficiency. Steady state: fuel 900 K,
+  T-avg 550 K, ~990 MWe.
+- Fidelity: neutronics + decay heat + xenon are genuine industry-standard 0-D
+  models; thermal side is a calibrated reduced-order model (good intuition,
+  approximate off-nominal numbers).
 
-## Liquid Glass API notes (post-knowledge-cutoff, verified)
-- `.glassEffect(.regular, in: <shape>)` ✅ — `Glass.regular/.clear/.identity`.
-- `.glassEffect(.regular.tint(color).interactive(), in: <shape>)` for controls.
-- `GlassEffectContainer(spacing:) { }` merges adjacent glass.
-- `.glassEffectID(id, in: ns)` needs a STABLE `@Namespace`.
-- `GlassEffect()` does NOT exist — compile error.
+## Tests (`Tests/ReactorSimTests/PhysicsTests.swift`) — 16, all green
+DecayHeat (3), Plant (3: steady-state, scram/decay, rod rate limit),
+ThermalHydraulics (4: leg split, Dittus-Boelter, transport lag, saturation),
+Automation (2: MASTER AUTO holds steady, rods follow turbine load),
+Supervisor (4: BOP at 600×, alarm latching, startup sequencer, scram-reset sync).
 
-## Possible next steps
-- Run the app and eyeball the new look (spacing/typography may want tuning).
-- Auto controllers (ICTab cards are placeholders, all MANUAL).
-- SG inventory ↔ core coupling (feedwater loss currently doesn't dry the SG).
-- Multi-nuclide xenon display, boron dilution UI affordance.
+## Known next steps / open items
+- Visual polish of the new consoles (Workstation/Benchboard built but not yet
+  eyeballed); remaining mimic label/pipe spacing.
+- Optional higher fidelity: real pressurizer (two-phase + heaters/spray on
+  saturation), boron worth vs temperature/burnup.
+- Architecture is ready for more reactor types (`ReactorType` enum: PWR active,
+  BWR/SMR stubbed).
