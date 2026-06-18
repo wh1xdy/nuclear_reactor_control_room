@@ -628,9 +628,9 @@ be corrected to `rod_drop_tau = 18.0` for RBMK.
 
 | Priority | Item | Files affected |
 |---|---|---|
-| 1 | RBMK rod insertion time fix (3 s → 18 s) | `physics_engine_rbm.py` |
+| 1 | RBMK rod insertion time fix (3 s → 18 s) | `physics_engine_rbmk.py` |
 | 2 | Non-linear rod worth S-curve | All three physics engines |
-| 3 | RBMK graphite tip positive reactivity | `physics_engine_rbm.py` |
+| 3 | RBMK graphite tip positive reactivity | `physics_engine_rbmk.py` |
 | 4 | SCRAM reset key `L` — add to `run_control_room.py` | `run_control_room.py` |
 | 5 | Longer trend window (historian at 1 Hz, 60 min) | `run_control_room.py` |
 | 6 | More trips (flux, flow, level) | `plant_supervisor.py` |

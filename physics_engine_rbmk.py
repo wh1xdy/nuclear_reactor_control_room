@@ -1,5 +1,5 @@
 """
-physics_engine_rbm.py
+physics_engine_rbmk.py
 ---------------------
 
 This module provides a lumped‑parameter physics engine for an
