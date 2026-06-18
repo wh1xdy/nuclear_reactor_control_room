@@ -9,7 +9,7 @@ from typing import Any, Deque, Dict, List, Literal, Optional, Tuple
 
 from physics_engine import ControlInputs as PWRControlInputs, PWRPlant
 from physics_engine_bwr import BWRControlInputs, BWRPlant
-from physics_engine_rbm import RBMKControlInputs, RBMKPlant
+from physics_engine_rbmk import RBMKControlInputs, RBMKPlant
 
 
 ReactorType = Literal["PWR", "BWR", "RBMK"]
