@@ -68,7 +68,7 @@ Each engine is a self-contained module that exposes this pattern:
 |---|---|---|
 | `physics_engine.py` | PWR | Two-node thermal-hydraulics, steam generator, iapws optional |
 | `physics_engine_bwr.py` | BWR | Void fraction feedback, direct steam cycle, reactor pressure |
-| `physics_engine_rbm.py` | RBMK | Graphite moderator node, positive void coefficient, three thermal nodes (fuel/graphite/coolant) |
+| `physics_engine_rbmk.py` | RBMK | Graphite moderator node, positive void coefficient, three thermal nodes (fuel/graphite/coolant) |
 
 All three engines share the same underlying dynamics:
 - **Six-group point kinetics** (U-235 β_i and λ_i values)

@@ -86,7 +86,7 @@ Each engine is a self-contained module that exposes:
 |---|---|---|
 | `physics_engine.py` | PWR | Two-node thermal-hydraulics, steam generator, iapws optional |
 | `physics_engine_bwr.py` | BWR | Void fraction feedback, direct steam cycle, reactor pressure |
-| `physics_engine_rbm.py` | RBMK | Graphite moderator node, positive void coefficient, three thermal nodes |
+| `physics_engine_rbmk.py` | RBMK | Graphite moderator node, positive void coefficient, three thermal nodes |
 
 ### UI layer (`run_control_room.py`)
 
