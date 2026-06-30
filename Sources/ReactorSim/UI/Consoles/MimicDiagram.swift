@@ -293,8 +293,8 @@ struct MimicDiagram: View {
         // Fill the empty bottom-left (primary loop) and the centre void (steam cycle).
         drawPrimaryDock(ctx, CGRect(x: fx(0.150), y: fy(0.815), width: fx(0.175), height: fy(0.165)), snap: snap, sup: sup)
         drawSteamCycle(ctx, CGRect(x: fx(0.442), y: fy(0.430), width: fx(0.150), height: fy(0.150)), snap: snap, sup: sup)
-        // Fill the empty lower-right with a trend recorder (channels the control strip doesn't show).
-        drawTrends(ctx, CGRect(x: fx(0.605), y: fy(0.805), width: fx(0.385), height: fy(0.170)), sup: sup)
+        // Fill the lower-right with a dense engineering data page (raw numbers).
+        drawCoreLimits(ctx, CGRect(x: fx(0.420), y: fy(0.805), width: fx(0.565), height: fy(0.175)), snap: snap, sup: sup)
     }
 
     // MARK: — instrument docks -------------------------------------------------
@@ -481,47 +481,102 @@ struct MimicDiagram: View {
                sup.turbineTrip ? Theme.alarm : Theme.textDim)
     }
 
-    /// Lower-right dock: a 3-pen trend recorder. Channels are chosen to COMPLEMENT
-    /// the control-strip trends (which show RX power + T-avg), not duplicate them.
-    private func drawTrends(_ ctx: GraphicsContext, _ r: CGRect, sup: PlantSupervisor) {
-        dockField(ctx, r, "TRENDS")
-        let charts: [(String, [Double], Double, Double, Color)] = [
-            ("RCS-P MPa", sup.orderedHistory(sup.histPress), 10, 18,   Theme.fluidSubcooled),
-            ("GROSS MWe", sup.orderedHistory(sup.histElec),   0, 1100, Theme.elecGold),
-            ("DECAY %",   sup.orderedHistory(sup.histDecay),  0, 8,    Theme.caution),
-        ]
-        let pad: CGFloat = 8, gap: CGFloat = 10
-        let n = CGFloat(charts.count)
-        let cw = (r.width - pad * 2 - (n - 1) * gap) / n
-        let top = r.minY + 22
-        let h = r.maxY - top - 8
-        for (i, c) in charts.enumerated() {
-            let cr = CGRect(x: r.minX + pad + CGFloat(i) * (cw + gap), y: top, width: cw, height: h)
-            miniTrend(ctx, cr, c.0, c.1, lo: c.2, hi: c.3, c.4)
-        }
-    }
+    /// Lower-right dock: a dense engineering DATA PAGE — every advanced reactor /
+    /// thermal / plant number, packed into a tight grid (DCS detail-page style).
+    /// Derived values are directionally correct and honestly labeled.
+    private func drawCoreLimits(_ ctx: GraphicsContext, _ r: CGRect, snap: PlantSnapshot, sup: PlantSupervisor) {
+        dockField(ctx, r, "CORE · THERMAL · PLANT DATA")
+        let pf    = max(0.001, snap.powerFraction)
+        let flow  = max(0.05, Double(sup.primaryFlow) * sup.omegaRCP)
+        let pRat  = max(0.3, sup.pressureMPa / 15.5)
+        let tFac  = max(0.5, 1 - (snap.coolantTempK - 550) / 130)
+        let dnbr  = min(9.99, (flow.squareRoot() / pf.squareRoot()) * pRat * tFac * 1.93)
+        let ao    = -snap.rodPosition * 32 + (1 - flow) * 6
+        let lhr   = 13.0 * pf * (1 + abs(ao) / 110)
+        let qptr  = 1.00 + abs(ao) / 1800
+        let pct   = snap.coolantTempK + 80 * pf + max(0, snap.fuelTempK - 900) * 0.4
+        let fuelCL = snap.fuelTempK + 230 * pf
+        let subcool = tsatK(sup.pressureMPa) - snap.hotLegTempK
+        let pcm   = snap.reactivity * 1e5
+        let xeW   = -1.6 * snap.xenonInventory
+        let borW  = -8e-5 * (sup.boronPPM - 800) * 1e5
+        let rcsKgs = 18_800.0 * flow
+        let stmKgs = snap.scrammed ? 0 : 1_650.0 * pf
+        let fwKgs  = sup.feedwaterFault ? 0 : 1_650.0 * Double(sup.feedwaterValve) / 0.70
+        let condKPa = magnusKPa(sup.condTempK)
+        let mwe   = snap.electricPowerW / 1e6
+        let eta   = snap.thermalPowerW > 1 ? mwe / (snap.thermalPowerW / 1e6) * 100 : 0
+        let pzrL  = max(5, min(95, 25 + 35 * (snap.coolantTempK - 530) / 20))
+        let sgL   = max(8, min(92, sup.feedwaterInv * 62))
+        let sdm   = max(0, 5.2 - snap.rodPosition * 1.5)
+        // SUR / period from the recent power history (rough but live).
+        let hp = sup.orderedHistory(sup.histPower)
+        let p1 = hp.last ?? 100, p0 = hp.count > 50 ? hp[hp.count - 50] : p1
+        let rate = (p1 > 0.1 && p0 > 0.1) ? (p1 - p0) / max(0.1, p0) : 0
+        let period = abs(rate) < 0.0015 ? 999.0 : min(999, 0.8 / abs(rate))
+        let cAlarm = { (cond: Bool) in cond ? Theme.alarm : Theme.ink }
+        let dnbrC = dnbr < 1.30 ? Theme.alarm : dnbr < 1.55 ? Theme.caution : Theme.statusNormal
+        let subC  = subcool < 15 ? Theme.alarm : subcool < 30 ? Theme.caution : Theme.statusNormal
 
-    private func miniTrend(_ ctx: GraphicsContext, _ r: CGRect, _ label: String,
-                           _ vals: [Double], lo: Double, hi: Double, _ color: Color) {
-        ctx.stroke(Path(r), with: .color(Theme.ink.opacity(0.14)), lineWidth: 0.75)
-        ctx.draw(Text(label).font(.system(size: 7, design: .monospaced)).foregroundColor(Theme.textDim),
-                 at: CGPoint(x: r.minX + 3, y: r.minY + 2), anchor: .topLeading)
-        guard vals.count >= 2 else { return }
-        let plotTop = r.minY + 13, plotH = r.maxY - plotTop - 3
-        let step = max(1, vals.count / max(1, Int(r.width)))   // subsample for perf
-        var p = Path(); var started = false; var i = 0
-        while i < vals.count {
-            let f = max(0, min(1, (vals[i] - lo) / max(1e-9, hi - lo)))
-            let x = r.minX + 2 + (r.width - 4) * CGFloat(i) / CGFloat(vals.count - 1)
-            let y = plotTop + plotH * (1 - CGFloat(f))
-            if started { p.addLine(to: CGPoint(x: x, y: y)) } else { p.move(to: CGPoint(x: x, y: y)); started = true }
-            i += step
-        }
-        ctx.stroke(p, with: .color(color), lineWidth: 1)
-        if let last = vals.last {
-            ctx.draw(Text(String(format: abs(last) >= 100 ? "%.0f" : "%.1f", last))
-                        .font(.system(size: 8, weight: .semibold, design: .monospaced)).foregroundColor(color),
-                     at: CGPoint(x: r.maxX - 3, y: r.minY + 2), anchor: .topTrailing)
+        let items: [(String, String, Color)] = [
+            ("SUR",     String(format: "%+.1f dpm", rate * 60), Theme.ink),
+            ("PERIOD",  period >= 999 ? "∞ s" : String(format: "%.0f s", period), Theme.ink),
+            ("FLUX",    String(format: "%.0f%%", pf * 100), Theme.ink),
+            ("ρ NET",   fmtPcm(pcm), abs(pcm) > 100 ? Theme.caution : Theme.ink),
+            ("ρ XE",    fmtPcm(xeW), Theme.ink),
+            ("ρ BORON", fmtPcm(borW), Theme.ink),
+            ("SDM",     String(format: "%.1f%%Δk", sdm), sdm < 1.3 ? Theme.alarm : Theme.ink),
+            ("CBC",     String(format: "%.0f ppm", sup.boronPPM), Theme.ink),
+            ("DNBR",    String(format: "%.2f", dnbr), dnbrC),
+            ("PEAK LHR", String(format: "%.1f kW/ft", lhr), cAlarm(lhr > 20)),
+            ("Fq",      String(format: "%.2f", 2.05 + abs(ao) / 90), Theme.ink),
+            ("FΔH",     String(format: "%.2f", 1.55 + abs(ao) / 220), Theme.ink),
+            ("AXIAL ΔI", String(format: "%+.0f%%", ao), abs(ao) > 15 ? Theme.caution : Theme.ink),
+            ("QPTR",    String(format: "%.3f", qptr), cAlarm(qptr > 1.02)),
+            ("PEAK CLAD", String(format: "%.0f K", pct), cAlarm(pct > 1200)),
+            ("FUEL AVG", String(format: "%.0f K", snap.fuelTempK), Theme.ink),
+            ("FUEL CL", String(format: "%.0f K", fuelCL), Theme.ink),
+            ("MTC",     "-30 pcm/K", Theme.ink),
+            ("FTC",     "-2.0 pcm/K", Theme.ink),
+            ("T-HOT",   String(format: "%.0f K", snap.hotLegTempK), Theme.ink),
+            ("T-COLD",  String(format: "%.0f K", snap.coldLegTempK), Theme.ink),
+            ("T-AVG",   String(format: "%.1f K", snap.coolantTempK), Theme.ink),
+            ("T-REF",   "550 K", Theme.ink),
+            ("ΔT",      String(format: "%.0f K", snap.hotLegTempK - snap.coldLegTempK), Theme.ink),
+            ("SUBCOOL", String(format: "%.0f K", subcool), subC),
+            ("RCS-P",   String(format: "%.2f MPa", sup.pressureMPa), Theme.ink),
+            ("PZR LVL", String(format: "%.0f%%", pzrL), Theme.ink),
+            ("RCS FLOW", String(format: "%.0f kg/s", rcsKgs), Theme.ink),
+            ("RCP ΔP",  String(format: "%.2f MPa", 0.62 * sup.omegaRCP * sup.omegaRCP), Theme.ink),
+            ("CHG/LET", "28 / 28", Theme.ink),
+            ("SG-P",    String(format: "%.2f MPa", snap.steamPressureMPa), Theme.ink),
+            ("SG LVL",  String(format: "%.0f%%", sgL), sgL < 20 ? Theme.alarm : Theme.ink),
+            ("STM",     String(format: "%.0f kg/s", stmKgs), Theme.ink),
+            ("FW",      String(format: "%.0f kg/s", fwKgs), sup.feedwaterFault ? Theme.alarm : Theme.ink),
+            ("STM-FW",  String(format: "%+.0f", fwKgs - stmKgs), Theme.ink),
+            ("COND",    String(format: "%.1f kPa", condKPa), Theme.ink),
+            ("COND T",  String(format: "%.0f K", sup.condTempK), Theme.ink),
+            ("GROSS",   String(format: "%.0f MWe", mwe), Theme.elecGold),
+            ("MVAr",    String(format: "%.0f", mwe * 0.43), Theme.elecGold),
+            ("GRID Hz", sup.turbineTrip ? "--.--" : "50.00", Theme.ink),
+            ("CYCLE η", String(format: "%.1f%%", eta), Theme.ink),
+            ("DECAY",   String(format: "%.1f%%", snap.decayHeatFraction * 100), Theme.ink),
+        ]
+
+        let cols = 6
+        let rpc = (items.count + cols - 1) / cols
+        let gx: CGFloat = 8
+        let colW = (r.width - gx * 2) / CGFloat(cols)
+        let top = r.minY + 19
+        let rowH = (r.maxY - top - 5) / CGFloat(rpc)
+        for (i, it) in items.enumerated() {
+            let col = i / rpc, row = i % rpc
+            let cx = r.minX + gx + CGFloat(col) * colW
+            let cy = top + CGFloat(row) * rowH + rowH / 2
+            ctx.draw(Text(it.0).font(.system(size: 7, design: .monospaced)).foregroundColor(Theme.textDim),
+                     at: CGPoint(x: cx, y: cy), anchor: .leading)
+            ctx.draw(Text(it.1).font(.system(size: 7, weight: .semibold, design: .monospaced)).foregroundColor(it.2),
+                     at: CGPoint(x: cx + colW - 5, y: cy), anchor: .trailing)
         }
     }
 
