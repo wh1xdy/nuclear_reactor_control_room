@@ -51,14 +51,12 @@ struct SettingsView: View {
                     }
 
                     // ── Reactor ──
-                    section("REACTOR TYPE", "Only the PWR is modelled today. More plant types are planned.")
+                    section("REACTOR TYPE", "Switching rebuilds the plant model. Each shares the same six-group kinetics, decay heat and xenon, with kind-specific thermal-hydraulics and balance-of-plant.")
                     VStack(spacing: 8) {
                         ForEach(ReactorType.allCases) { r in
                             choiceRow(symbol: "atom", title: r.label,
-                                      blurb: r.available ? "Full neutronics + thermal-hydraulics model." : "Coming soon — not yet modelled.",
-                                      selected: reactor == r, enabled: r.available) {
-                                if r.available { reactor = r }
-                            }
+                                      blurb: r.modelBlurb,
+                                      selected: reactor == r, enabled: true) { reactor = r }
                         }
                     }
                 }

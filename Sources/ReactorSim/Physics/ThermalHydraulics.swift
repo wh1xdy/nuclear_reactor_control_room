@@ -25,6 +25,11 @@ final class ThermalHydraulics {
     var tSG:   Double       // steam-generator secondary (saturation) node [K]
     var electricPower: Double
     private(set) var steamPressureMPa: Double = 0
+    /// Core-average void fraction. Inert for subcooled PWR/SMR (stays 0); for a
+    /// BWR it tracks boiling intensity (∝ power) against flow, and the plant
+    /// reads it for the void-reactivity feedback. Kept OUT of the temperature
+    /// ODEs so PWR thermal behavior is unchanged.
+    private(set) var voidFraction: Double
 
     /// Reactor coolant average temperature — drives moderator feedback & display.
     var tAvg: Double { 0.5 * (tHot + tCold) }
@@ -43,6 +48,7 @@ final class ThermalHydraulics {
         tSG   = params.nominalSGTemp                    // 490 K
         electricPower = params.nominalPower * params.turbineEfficiency
         steamPressureMPa = ThermalHydraulics.satPressureMPa(tSG)
+        voidFraction = params.nominalVoidFraction       // start at equilibrium void
     }
 
     /// Advance by dt seconds given thermal power P_th [W] and control inputs.
@@ -61,9 +67,9 @@ final class ThermalHydraulics {
 
         let tAvgCore = 0.5 * (tHot + tCold)
         let qFC = hFC * (tFuel - tAvgCore)                 // fuel → coolant
-        // SG primary side sees the delivered hot leg averaged with its outlet.
-        let tSGprim = 0.5 * (tHL + tCold)
-        let qCS = hCS * (tSGprim - tSG)                    // coolant → SG secondary
+        // SG evaporator boils at ~553K (6.5 MPa); the hot leg (≈565K) drives it
+        // with a ~12 K pinch — the ceiling for this primary T-avg.
+        let qCS = hCS * (tHL - tSG)                        // coolant → SG secondary
         // Steam removal to the condenser, modulated by the turbine/dump valve.
         let qST = p.hSGToTurbine * max(turbineValve, 0) * max(0, tSG - p.condenserTempK)
 
@@ -88,16 +94,28 @@ final class ThermalHydraulics {
         // Saturation steam pressure from the SG secondary temperature.
         steamPressureMPa = ThermalHydraulics.satPressureMPa(tSG)
 
+        // ── Core void fraction (BWR feedback driver; inert when nominal=0) ────
+        // Boiling scales with power; flow sweeps voids out / subcools the core.
+        // First-order lag (~1.5 s) — voids respond fast but not instantly.
+        if p.nominalVoidFraction > 0 {
+            let pf = max(0, thermalPower / max(p.nominalPower, 1))
+            let target = min(0.9, p.nominalVoidFraction * pf / max(f, 0.1))
+            voidFraction += (target - voidFraction) / 1.5 * dt
+            voidFraction = max(0, min(0.95, voidFraction))
+        }
+
         // Carnot-scaled gross efficiency: warmer steam / colder sink → more work.
         let eta = p.turbineCarnotFraction * max(0, 1 - p.condenserTempK / max(tSG, 1))
         electricPower = max(qST, 0) * eta
         return electricPower
     }
 
-    /// Antoine saturation pressure for water, T[K] → P[MPa]. NIST coefficients
-    /// for the 379–573 K range (covers SG and condenser operating points).
+    /// Antoine saturation pressure for water, T[K] → P[MPa]. Constants re-anchored
+    /// to steam-table points across the plant's range — condenser (310K→6.2 kPa),
+    /// mid (490K→2.1 MPa) and PWR S/G (553K→6.4 MPa) — since the old 379–573 K set
+    /// read ~19% low near 553 K and would have shown a sub-realistic S/G pressure.
     static func satPressureMPa(_ tK: Double) -> Double {
-        let A = 4.6543, B = 1435.264, C = -64.848
+        let A = 5.444, B = 1951.8, C = -16.5
         let logPbar = A - B / (max(tK, 50) + C)   // P in bar
         return pow(10, logPbar) / 10.0            // bar → MPa
     }

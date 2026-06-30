@@ -43,8 +43,17 @@ struct ContentView: View {
             .background(Theme.bg)
             .frame(minWidth: 1100, minHeight: 700)
             .onAppear {                     // stable identity — physics/keys start once
+                // Honor a persisted reactor selection from a previous launch.
+                if supervisor.reactorKind != reactor.wrappedValue.kind {
+                    supervisor = PlantSupervisor(kind: reactor.wrappedValue.kind)
+                }
                 startPhysics()
                 startKeyMonitor()
+            }
+            .onChange(of: reactorRaw) { _, newVal in
+                // Switching reactor type rebuilds the plant model from scratch.
+                supervisor = PlantSupervisor(kind: (ReactorType(rawValue: newVal) ?? .pwr).kind)
+                startPhysics()
             }
             .onDisappear {
                 physicsTimer?.invalidate()
@@ -141,7 +150,7 @@ struct ContentView: View {
         case ",": showSettings.toggle()
         case "c": supervisor.acknowledgeAllAlarms()
         case "l": supervisor.resetScram()
-        case "r": supervisor = PlantSupervisor(); startPhysics()
+        case "r": supervisor = PlantSupervisor(kind: reactor.wrappedValue.kind); startPhysics()
         case "+", "=": cycleSpeed()
         case "-":
             let idx = max(0, (speeds.firstIndex(of: timeSpeed) ?? 0) - 1)

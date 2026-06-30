@@ -58,13 +58,31 @@ enum ReactorType: String, CaseIterable, Identifiable {
     case smr
 
     var id: String { rawValue }
-    var available: Bool { self == .pwr }
+    var available: Bool { true }
+
+    /// Maps the UI selection onto the physics-layer reactor profile.
+    var kind: ReactorKind {
+        switch self {
+        case .pwr: return .pwr
+        case .bwr: return .bwr
+        case .smr: return .smr
+        }
+    }
 
     var label: String {
         switch self {
         case .pwr: return "PWR — Pressurized Water Reactor"
         case .bwr: return "BWR — Boiling Water Reactor"
         case .smr: return "SMR — Small Modular Reactor"
+        }
+    }
+
+    /// One-line model description shown in Settings.
+    var modelBlurb: String {
+        switch self {
+        case .pwr: return "3000 MWt · pressurizer + steam generators · soluble-boron shim."
+        case .bwr: return "Direct cycle · 7 MPa steam dome · recirc-flow power control via void feedback."
+        case .smr: return "Integral 200 MWt · natural circulation · passive — no reactor coolant pumps."
         }
     }
     var short: String { rawValue.uppercased() }

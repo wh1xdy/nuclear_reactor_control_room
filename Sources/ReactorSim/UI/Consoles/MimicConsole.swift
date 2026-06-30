@@ -37,12 +37,17 @@ private struct MimicKeyParams: View {
             cell("PZR PRESS", String(format: "%.2f", supervisor.pressureMPa), "MPa",
                  supervisor.pressureMPa > 17 ? Theme.alarm : Theme.ink)
             sep
-            cell("REACTIVITY", String(format: "%+.0f", s.reactivity * 1e5), "pcm",
+            cell("REACTIVITY", pcmString(s.reactivity), "pcm",
                  .reactivityStatus(s.reactivity))
         }
         .frame(height: 62)
         .background(Theme.panel)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+    }
+    // Avoids the ugly "−0" that "%+.0f" prints for tiny negative reactivity.
+    private func pcmString(_ rho: Double) -> String {
+        let pcm = rho * 1e5
+        return abs(pcm) < 0.5 ? "0" : String(format: "%+.0f", pcm)
     }
     private var sep: some View { Rectangle().fill(Theme.sep).frame(width: 1).padding(.vertical, 12) }
     private func cell(_ label: String, _ value: String, _ unit: String, _ color: Color) -> some View {

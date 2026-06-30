@@ -82,24 +82,35 @@ final class PlantSupervisor {
         return p.gammaXe / (p.lambdaXe + p.xenonBurnCoeff)
     }()
 
-    init() {
-        let p = PlantParams()
-        plant = PWRPlant(params: p)
+    /// The reactor kind in service. UI reads it to label kind-specific values.
+    var reactorKind: ReactorKind { plant.params.kind }
+
+    init(kind: ReactorKind = .pwr) {
+        let p: PlantParams
+        switch kind {
+        case .pwr: p = .pwr()
+        case .bwr: p = .bwr()
+        case .smr: p = .smr()
+        }
+        plant = ReactorPlant(params: p)
+        let elecMW = p.nominalPower * p.turbineEfficiency / 1e6
+        pressureMPa = p.nominalPressureMPa
         snapshot = PlantSnapshot(
-            time: 0, powerFraction: 1, thermalPowerW: 3e9, electricPowerW: 990e6,
-            fuelTempK: 900, coolantTempK: 550, sgTempK: 550,
+            time: 0, powerFraction: 1, thermalPowerW: p.nominalPower,
+            electricPowerW: p.nominalPower * p.turbineEfficiency,
+            fuelTempK: 900, coolantTempK: 550, sgTempK: 553,
             reactivity: 0, xenonInventory: 0, iodineInventory: 0,
             rodPosition: 0, scrammed: false, decayHeatFraction: 0
         )
         let n = 600
-        histPower  = Array(repeating: 100.0,  count: n)
-        histReact  = Array(repeating: 0.0,    count: n)
-        histFuelT  = Array(repeating: 900.0,  count: n)
-        histDecay  = Array(repeating: 0.0,    count: n)
-        histPress  = Array(repeating: 15.5,   count: n)
-        histElec   = Array(repeating: 990.0,  count: n)
-        histSteamT = Array(repeating: 550.0,  count: n)
-        histCoolT  = Array(repeating: 550.0,  count: n)
+        histPower  = Array(repeating: 100.0,                 count: n)
+        histReact  = Array(repeating: 0.0,                   count: n)
+        histFuelT  = Array(repeating: 900.0,                 count: n)
+        histDecay  = Array(repeating: 0.0,                   count: n)
+        histPress  = Array(repeating: p.nominalPressureMPa,  count: n)
+        histElec   = Array(repeating: elecMW,                count: n)
+        histSteamT = Array(repeating: 553.0,                 count: n)
+        histCoolT  = Array(repeating: 550.0,                 count: n)
     }
 
     // MARK: — Step
@@ -116,9 +127,15 @@ final class PlantSupervisor {
             ? max(0, min(0.2, 0.02 * (snapshot.coolantTempK - 550.0)))
             : turbineValve
         steamDumpValve = turbineTrip ? effectiveValve : 0
+        // Natural circulation (SMR): coolant flow is buoyancy-driven and rises
+        // with power — the operator can't pump harder. Otherwise flow is the
+        // pump/recirc demand scaled by RCP speed.
+        let effFlow = plant.params.naturalCirculation
+            ? min(1.0, 0.25 + 0.75 * max(0, snapshot.powerFraction).squareRoot())
+            : primaryFlow * omegaRCP
         let ctrl = ControlInputs(
             rodPosition:    rodPosition,
-            primaryFlow:    primaryFlow * omegaRCP,
+            primaryFlow:    effFlow,
             turbineValve:   effectiveValve,
             turbineTripped: turbineTrip,
             scram:          scrammed
@@ -227,8 +244,11 @@ final class PlantSupervisor {
     // MARK: — BOP
 
     private func updateBOP(dt: Double) {
-        // RCP coast-down on pump fault
-        if pumpDegraded {
+        // RCP coast-down on pump fault. Natural-circulation plants (SMR) have
+        // no reactor coolant pumps — flow is set in step(), so pin omega to 1.
+        if plant.params.naturalCirculation {
+            omegaRCP = 1.0
+        } else if pumpDegraded {
             omegaRCP = max(0.04, omegaRCP - dt / 12.0)
         } else {
             omegaRCP = min(1.0, omegaRCP + dt / 30.0)
@@ -259,29 +279,39 @@ final class PlantSupervisor {
         let fwOut = max(0, snapshot.powerFraction) * 0.07 * dt
         feedwaterInv = max(0, min(1.2, feedwaterInv + fwIn - fwOut))
 
-        // Pressurizer: relax toward target, exact exponential (600×-stable).
-        // Asymmetric coupling: overheating spikes pressure so the 17.0 MPa
-        // HIGH_PRESS trip is reachable; on cooldown the heaters hold pressure —
-        // a post-scram cooldown must not sail below the 11.5 MPa ECCS setpoint.
-        // PZR AUTO (heaters + spray) damps the coupling and reacts faster, but
-        // spray can't fully mask a severe overheat (trip still reachable).
-        let dT = snapshot.coolantTempK - 550.0
-        let pTarget = pzrAutoEnabled
-            ? 15.5 + (dT > 0 ? dT * 0.03 : dT * 0.004)
-            : 15.5 + (dT > 0 ? dT * 0.05 : dT * 0.01)
-        let pRate = pzrAutoEnabled ? 0.05 : 0.02
-        pressureMPa = pTarget + (pressureMPa - pTarget) * exp(-pRate * dt)
-        pressureMPa = max(10.0, min(17.5, pressureMPa))
+        // Primary/dome pressure. PWR & SMR hold pressure with a pressurizer
+        // (heaters + spray); the target tracks the nominal set pressure with an
+        // asymmetric thermal coupling so an overheat can still reach the HIGH
+        // trip while a cooldown holds above the ECCS setpoint. A BWR has no
+        // pressurizer: the steam dome swells with steam inventory and is relieved
+        // by the turbine. All thresholds are referenced to the nominal pressure.
+        let nomP = plant.params.nominalPressureMPa
+        if plant.params.hasPressurizer {
+            let dT = snapshot.coolantTempK - 550.0
+            let pTarget = pzrAutoEnabled
+                ? nomP + (dT > 0 ? dT * 0.03 : dT * 0.004)
+                : nomP + (dT > 0 ? dT * 0.05 : dT * 0.01)
+            let pRate = pzrAutoEnabled ? 0.05 : 0.02
+            pressureMPa = pTarget + (pressureMPa - pTarget) * exp(-pRate * dt)
+            pressureMPa = max(10.0, min(17.5, pressureMPa))
+        } else {
+            // BWR steam dome: pressure rises with stored steam, turbine relieves it.
+            let pTarget = nomP + (steamInv - 1.0) * 1.5
+            pressureMPa = pTarget + (pressureMPa - pTarget) * exp(-0.1 * dt)
+            pressureMPa = max(2.0, min(nomP + 2.0, pressureMPa))
+        }
 
-        // PORV
-        porvOpen = pressureMPa > 16.55
+        // Relief valve (PORV / BWR SRV) lifts above the set pressure.
+        porvOpen = pressureMPa > nomP + 1.05
 
-        // ECCS arms on low pressure
-        if pressureMPa < 11.5 { eccsActuated = true }
-        if pressureMPa > 13.0 && feedwaterInv > 0.3 { eccsActuated = false }
+        // ECCS arms on low pressure (loss of inventory), resets when restored.
+        if pressureMPa < nomP - 4.0 { eccsActuated = true }
+        if pressureMPa > nomP - 2.5 && feedwaterInv > 0.3 { eccsActuated = false }
     }
 
     private func updateBoron(dt: Double) {
+        // BWRs have no soluble-boron chemical shim in normal operation.
+        guard plant.params.hasBoron else { return }
         let vPrimary = 300.0   // m³ approximate primary coolant volume
         let dB = (borationRate * 150.0 - dilutionRate * boronPPM) / vPrimary * dt
         boronPPM = max(0, boronPPM + dB)
@@ -293,9 +323,9 @@ final class PlantSupervisor {
 
     private func updateAlarms() {
         let s = snapshot
-        let nomP = 15.5
+        let nomP = plant.params.nominalPressureMPa
 
-        let pTrip = nomP + 1.5   // 17.0 MPa trip (15.5 + 1.5), realistic PWR HIHI
+        let pTrip = nomP + 1.5   // HIHI trip 1.5 MPa over set pressure (17.0 PWR / 8.5 BWR)
         _check("HIGH_FLUX",   s.powerFraction > 1.20, 1, "HIGH NEUTRON FLUX — TRIP",       isTrip: true)
         _check("HIGH_FUEL_T", s.fuelTempK > 1500,     1, "HIGH FUEL TEMPERATURE — TRIP",   isTrip: true)
         _check("HIGH_PRESS",  pressureMPa > pTrip,    1, "HIGH REACTOR COOLANT PRESS TRIP", isTrip: true)
