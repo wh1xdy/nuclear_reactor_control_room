@@ -239,3 +239,63 @@ final class SupervisorTests: XCTestCase {
         XCTAssertGreaterThan(sup.rodPosition, 0.94, "demand must follow actual position")
     }
 }
+
+@MainActor
+final class ReactorKindTests: XCTestCase {
+
+    /// BWR signature: raising recirculation flow collapses voids → +reactivity →
+    /// power rises; lowering flow does the opposite. The defining maneuvering tool.
+    func testBWRRecircFlowControlsPower() {
+        let up = PlantSupervisor(kind: .bwr)
+        let dn = PlantSupervisor(kind: .bwr)
+        for _ in 0..<120 { up.step(dt: 1.0); dn.step(dt: 1.0) }   // settle at full power
+        XCTAssertEqual(up.snapshot.powerFraction, 1.0, accuracy: 0.06)   // stable steady state
+
+        up.primaryFlow = 1.10                                    // recirc up
+        dn.primaryFlow = 0.90                                    // recirc down
+        for _ in 0..<240 { up.step(dt: 1.0); dn.step(dt: 1.0) }
+
+        XCTAssertGreaterThan(up.snapshot.powerFraction,
+                             dn.snapshot.powerFraction + 0.04,
+                             "BWR: higher recirc flow must give higher power via void collapse")
+        XCTAssertTrue(up.snapshot.powerFraction.isFinite && dn.snapshot.powerFraction.isFinite)
+        XCTAssertTrue(up.trips.isEmpty, "modest flow-up must not trip: \(up.trips)")
+    }
+
+    /// BWR profile: ~7 MPa steam dome (no pressurizer) and no soluble-boron shim.
+    func testBWRProfile() {
+        let sup = PlantSupervisor(kind: .bwr)
+        for _ in 0..<60 { sup.step(dt: 1.0) }
+        XCTAssertEqual(sup.reactorKind, .bwr)
+        XCTAssertEqual(sup.pressureMPa, 7.0, accuracy: 1.5)      // dome, not 15.5 MPa
+        sup.borationRate = 1.0                                   // boration lever is inert
+        let before = sup.boronPPM
+        for _ in 0..<60 { sup.step(dt: 1.0) }
+        XCTAssertEqual(sup.boronPPM, before, accuracy: 1e-6)
+    }
+
+    /// SMR: integral PWR scaled to ~200 MWt with calibrated temperatures.
+    func testSMRScaledPower() {
+        let sup = PlantSupervisor(kind: .smr)
+        var snap = sup.snapshot
+        for _ in 0..<600 { sup.step(dt: 1.0); snap = sup.snapshot }
+        XCTAssertEqual(sup.reactorKind, .smr)
+        XCTAssertEqual(snap.powerFraction, 1.0, accuracy: 0.04)
+        XCTAssertEqual(snap.thermalPowerW / 1e6, 200, accuracy: 20)   // ~200 MWt, not 3000
+        XCTAssertEqual(snap.coolantTempK, 550, accuracy: 12)
+        XCTAssertEqual(snap.fuelTempK,    900, accuracy: 25)
+    }
+
+    /// SMR natural circulation: no RCPs (omega pinned), and the flow lever is inert
+    /// because coolant flow is buoyancy-driven and set by power, not by the operator.
+    func testSMRNaturalCirculation() {
+        let sup = PlantSupervisor(kind: .smr)
+        for _ in 0..<200 { sup.step(dt: 1.0) }
+        XCTAssertEqual(sup.omegaRCP, 1.0, accuracy: 1e-6)
+        let tBaseline = sup.snapshot.coolantTempK
+        sup.primaryFlow = 0.3                                    // try to throttle "pumps"
+        for _ in 0..<120 { sup.step(dt: 1.0) }
+        XCTAssertEqual(sup.snapshot.coolantTempK, tBaseline, accuracy: 6,
+                       "natural-circ flow must ignore the operator flow lever")
+    }
+}

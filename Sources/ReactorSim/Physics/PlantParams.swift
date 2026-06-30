@@ -4,7 +4,27 @@
 
 import Foundation
 
+/// Which reactor the parameter set describes. The shared sub-models (point
+/// kinetics, decay heat, xenon) are identical across kinds; only the thermal
+/// profile, the void-feedback term, and the balance-of-plant differ.
+enum ReactorKind: String, Sendable, CaseIterable { case pwr, bwr, smr }
+
 struct PlantParams: Sendable {
+    // MARK: — Reactor identity / profile
+    // PWR defaults below keep `PlantParams()` bit-identical to the validated
+    // model; `bwr()` / `smr()` factories override only what genuinely differs.
+    var kind: ReactorKind = .pwr
+    var hasPressurizer: Bool = true        // PWR/SMR: PZR holds primary pressure
+    var hasBoron: Bool = true              // chemical shim (PWR/SMR); BWR has none in normal ops
+    var hasSteamGenerator: Bool = true     // indirect cycle; BWR is direct (steam from core)
+    var naturalCirculation: Bool = false   // SMR: buoyancy-driven flow, no RCPs
+    var nominalPressureMPa: Double = 15.5  // primary (PWR/SMR) or steam-dome (BWR)
+    /// Void-fraction reactivity coefficient [Δk/k per unit void], referenced to
+    /// the nominal void below so the steady operating point is unchanged. ≈0 for
+    /// subcooled PWR/SMR; strongly negative for a BWR (its defining feedback).
+    var voidCoeff: Double = 0.0
+    var nominalVoidFraction: Double = 0.0  // core-average void at full power & flow
+
     // MARK: — Six-group delayed neutron data (U-235 thermal fission)
     let beta: [Double] = [2.15e-4, 1.424e-3, 1.274e-3, 2.568e-3, 7.48e-4, 2.73e-4]
     let lambdaD: [Double] = [0.0124, 0.0305, 0.111, 0.301, 1.14, 3.01]
@@ -24,16 +44,17 @@ struct PlantParams: Sendable {
     var sgHeatCapacity: Double       = 1.0e8
 
     // MARK: — Heat transfer coefficients [W/K]
-    // Calibrated so that at n=1.0, flow=1.0, turbine=1.0 the steady-state
-    // temperatures match the nominal values (T_fuel=900K, T_avg=550K, T_sg=490K):
-    //   h_FC = P_nom / (T_fuel − T_avg) = 3e9 / 350 = 8.57e6
-    //   h_CS = P_nom / (T_avg  − T_sg)  = 3e9 / 60  = 5.0e7
-    //   h_ST = P_nom / (T_sg   − T_cond)= 3e9 / 180 = 1.67e7
-    // These are the CONVECTIVE coefficients; they scale with flow^0.8
-    // (Dittus–Boelter) in the model, not linearly.
+    // Calibrated so that at n=1.0, flow=1.0, turbine=1.0 the steady state matches
+    // nominal (T_fuel=900K, T_avg=550K, T_sg=553K — a realistic ~6.5 MPa S/G):
+    //   h_FC = P_nom / (T_fuel  − T_avg) = 3e9 / 350 = 8.57e6
+    //   h_CS = P_nom / (T_hot   − T_sg)  = 3e9 / 12  = 2.5e8   (evaporator pinch off the HOT leg)
+    //   h_ST = P_nom / (T_sg    − T_cond)= 3e9 / 243 = 1.235e7
+    // The S/G boils at 553K (~280°C); the primary HOT leg (565K) drives it with a
+    // 12 K pinch — tight but physical, and the ceiling for this T-avg. These are
+    // CONVECTIVE coefficients; they scale with flow^0.8 (Dittus–Boelter).
     var hFuelToCoolant: Double   = 8.57e6
-    var hCoolantToSG: Double     = 5.0e7
-    var hSGToTurbine: Double     = 1.67e7
+    var hCoolantToSG: Double     = 2.5e8
+    var hSGToTurbine: Double     = 1.235e7
     // Condenser cold-side temperature (turbine exhaust sink) [K]
     var condenserTempK: Double   = 310.0
 
@@ -49,9 +70,11 @@ struct PlantParams: Sendable {
 
     // MARK: — Turbine
     var turbineEfficiency: Double = 0.33      // ~33% thermal efficiency (legacy seed)
-    // Gross efficiency is Carnot-scaled: η = fraction·(1 − T_cond/T_sg). At
-    // nominal (T_sg=490, T_cond=310) this gives 0.9·0.367 ≈ 0.33.
-    var turbineCarnotFraction: Double = 0.9
+    // Gross efficiency is Carnot-scaled: η = fraction·(1 − T_cond/T_sg). At the
+    // realistic S/G (T_sg=553, T_cond=310) the Carnot ceiling is 1−310/553 ≈ 0.44,
+    // so 0.751·0.44 ≈ 0.33 net — the ~10-pt loss to irreversibilities/aux load that
+    // makes 33% credible at 6.5 MPa steam (NOT the 0.9·0.37 of the old 1.9 MPa state).
+    var turbineCarnotFraction: Double = 0.751
 
     // MARK: — Control rod reactivity
     var rodWorth: Double        = -0.05       // Δk/k fully inserted
@@ -75,7 +98,7 @@ struct PlantParams: Sendable {
     // MARK: — Nominal operating temperatures [K]
     var nominalFuelTemp: Double    = 900.0
     var nominalCoolantTemp: Double = 550.0
-    var nominalSGTemp: Double      = 490.0   // T_sg = T_cool − P/(h_CS) = 550−60 = 490
+    var nominalSGTemp: Double      = 553.0   // ~280°C saturation → ~6.5 MPa secondary
 
     // MARK: — Integration
     // Thermal/xenon substep. Fastest thermal time constant is the coolant node
@@ -87,4 +110,49 @@ struct PlantParams: Sendable {
 
     // MARK: — Derived
     var betaTotal: Double { beta.reduce(0, +) }
+
+    // MARK: — Reactor-kind factories
+    // PWR is the unmodified baseline. BWR adds void feedback + a direct cycle.
+    // SMR is an integral PWR scaled to ~200 MWt with natural circulation.
+
+    static func pwr() -> PlantParams { PlantParams() }
+
+    /// Boiling Water Reactor: direct cycle, ~7 MPa steam dome, no pressurizer or
+    /// chemical shim. Power is shaped by recirculation flow through the void
+    /// coefficient — raise flow → collapse voids → +reactivity; raise power →
+    /// more boiling → −reactivity (a strong, stabilizing negative power coeff).
+    static func bwr() -> PlantParams {
+        var p = PlantParams()
+        p.kind                = .bwr
+        p.hasPressurizer      = false
+        p.hasBoron            = false      // SLC is emergency-only; not a control lever here
+        p.hasSteamGenerator   = false      // steam is raised in the core itself
+        p.nominalPressureMPa  = 7.0        // reactor steam dome
+        p.nominalVoidFraction = 0.40       // core-average void at full power
+        p.voidCoeff           = -0.04      // Δk/k per unit void deviation — the defining feedback
+        p.coolantTempCoeff    = -1.5e-4    // moderator-temp coeff weaker; void carries moderation
+        return p
+    }
+
+    /// Small Modular Reactor: integral PWR (pressurizer + SG inside the vessel)
+    /// at ~200 MWt with passive natural-circulation flow. Heat capacities and
+    /// conductances scale with power so temperatures and time-constants match a
+    /// full PWR — only the absolute power (and MWe) shrink.
+    static func smr() -> PlantParams {
+        var p = PlantParams()
+        p.kind               = .smr
+        p.naturalCirculation = true
+        p.nominalPressureMPa = 13.8
+        let r = 200.0e6 / p.nominalPower   // power ratio 200 MWt : 3000 MWt
+        p.nominalPower      *= r
+        p.fuelHeatCapacity  *= r
+        p.hotLegCapacity    *= r
+        p.coldLegCapacity   *= r
+        p.sgHeatCapacity    *= r
+        p.hFuelToCoolant    *= r
+        p.hCoolantToSG      *= r
+        p.hSGToTurbine      *= r
+        p.primaryAdvection  *= r
+        return p
+    }
 }

@@ -51,7 +51,8 @@ enum Theme {
 
     // MARK: — Text
     static var text       : Color { isLight ? Color(r: 26, g: 30, b: 34) : Color(r: 215, g: 218, b: 215) }
-    static var textDim    : Color { isLight ? Color(r: 74, g: 80, b: 86) : Color(r: 85, g: 94, b: 88) }
+    // Dark-skin dim lifted ~25% so small scanned readouts (kg/s, K) survive glass blur.
+    static var textDim    : Color { isLight ? Color(r: 74, g: 80, b: 86) : Color(r: 108, g: 117, b: 111) }
     static var textHdr    : Color { isLight ? Color(r: 40, g: 46, b: 52) : Color(r: 135, g: 145, b: 140) }
 
     /// Primary "ink" — bright foreground on dark / dark ink on the light skin.
@@ -62,21 +63,28 @@ enum Theme {
     static var schematicBg: Color { isLight ? Color(r: 162, g: 168, b: 174) : Color(r: 8, g: 11, b: 16) }
 
     // MARK: — ISA status colors (saturated so they POP against the desk)
-    static let normal     = Color(r: 40,  g: 150, b: 60)    // green
-    static var caution    : Color { isLight ? Color(r: 200, g: 130, b: 0) : Color(r: 205, g: 160, b: 18) }   // amber
-    static let warning    = Color(r: 195, g: 95,  b: 18)    // orange
-    static var alarm      : Color { isLight ? Color(r: 196, g: 22, b: 22) : Color(r: 205, g: 38, b: 38) }    // red
+    // Three-way: light ISA / authentic-dark ISA (both kept disciplined) / GUIDED
+    // brightened so reserved colors survive the Liquid-Glass blur on near-black.
+    static let normal     = Color(r: 40,  g: 150, b: 60)    // green (legacy app-wide constant)
+    static var caution    : Color { isLight ? Color(r: 200, g: 130, b: 0) : (isFlat ? Color(r: 205, g: 160, b: 18) : Color(r: 240, g: 180, b: 41)) }   // amber
+    static var warning    : Color { isFlat ? Color(r: 195, g: 95, b: 18) : Color(r: 242, g: 114, b: 43) }    // orange
+    static var alarm      : Color { isLight ? Color(r: 196, g: 22, b: 22) : (isFlat ? Color(r: 205, g: 38, b: 38) : Color(r: 255, g: 69, b: 58)) }    // red
 
     // MARK: — Accent
     // Light ISA-101 uses a muted dark slate (grayscale philosophy). The dark
     // skins (guided + authenticDark) keep the electric blue.
-    static var accent     : Color { isLight ? Color(r: 60, g: 76, b: 94) : Color(r: 48, g: 144, b: 200) }
+    // Branch on isFlat so BOTH authentic skins desaturate (light→slate, dark→graphite);
+    // only GUIDED keeps the electric blue. Fixes pump triangles reading vivid blue on authentic-dark.
+    static var accent     : Color { isFlat ? (isLight ? Color(r: 60, g: 76, b: 94) : Color(r: 120, g: 130, b: 142)) : Color(r: 48, g: 144, b: 200) }
 
     // MARK: — P&ID fluid colors
-    static let water      = Color(r: 38,  g: 95,  b: 185)
+    // Branched like the newer fluid tokens so liquid fills / hot-leg nozzles read
+    // as translucent ink (monochrome) in the AUTHENTIC skins instead of leaking
+    // saturated blue/red onto a reserved-color HMI.
+    static var water      : Color { isFlat ? ink.opacity(0.18) : Color(r: 38,  g: 95,  b: 185) }
     static let twophase   = Color(r: 28,  g: 145, b: 185)
     static let steam      = Color(r: 105, g: 118, b: 128)
-    static let hotLeg     = Color(r: 185, g: 65,  b: 28)
+    static var hotLeg     : Color { isFlat ? ink.opacity(0.5)  : Color(r: 185, g: 65,  b: 28) }
 
     // MARK: — Slider
     static let sliderBg   = Color(r: 28,  g: 32,  b: 36)
@@ -207,4 +215,96 @@ extension View {
                         .strokeBorder(tint ?? Theme.border, lineWidth: tint == nil ? 1 : 1.5))
         }
     }
+}
+
+// MARK: — Purposeful color system (Plant Mimic)
+// Two laws: (1) HUE encodes physical medium + reactor state via continuous
+// functions of live values; (2) every saturated pixel maps to a REAL setpoint,
+// so any warm/orange/red pixel is a genuine off-normal measurement. The
+// anti-cliché inversion — operating temperature is a CALM teal, not warm — is
+// what gives the warning colors meaning. Every hue collapses to graphite/ink in
+// the AUTHENTIC skins (ISA-101 discipline); color erupts there only off-normal.
+extension Theme {
+    /// RGB interpolation across (knot,r,g,b) stops, knots ascending in [0,1].
+    private static func lerpRGB(_ stops: [(k: Double, r: Double, g: Double, b: Double)], _ t: Double) -> Color {
+        let x = max(0, min(1, t))
+        var a = stops[0], b = stops[stops.count - 1]
+        for i in 0..<(stops.count - 1) where x >= stops[i].k && x <= stops[i + 1].k {
+            a = stops[i]; b = stops[i + 1]; break
+        }
+        let f = max(0, min(1, (x - a.k) / max(1e-9, b.k - a.k)))
+        return Color(r: Int((a.r + (b.r - a.r) * f).rounded()),
+                     g: Int((a.g + (b.g - a.g) * f).rounded()),
+                     b: Int((a.b + (b.b - a.b) * f).rounded()))
+    }
+
+    private static let thermalStops: [(k: Double, r: Double, g: Double, b: Double)] = [
+        (0.00,  46, 107, 214),   // #2E6BD6 cold blue
+        (0.05,  70, 199, 192),   // #46C7C0 operating teal — the calm signature
+        (0.28, 224, 169,  46),   // #E0A92E amber
+        (0.64, 232,  99,  28),   // #E8631C orange
+        (1.00, 255,  59,  48),   // #FF3B30 incandescent red
+    ]
+
+    /// Temperature → color. GUIDED: 5-stop ramp over 525–1500 K. AUTHENTIC:
+    /// graphite ink unless K exceeds the caller's real trip (then caution/alarm).
+    static func colorFor(_ K: Double, trip: Double = .infinity) -> Color {
+        if isFlat {
+            if K >= trip { return alarm }
+            if K >= trip * 0.97 { return caution }
+            return ink
+        }
+        return lerpRGB(thermalStops, (K - 525) / 975)
+    }
+
+    private static let fuelStops: [(k: Double, r: Double, g: Double, b: Double)] = [
+        (0.00,  70, 199, 192),   // #46C7C0 teal at the ~900 K normal centerline (calm)
+        (0.50, 224, 169,  46),   // #E0A92E amber midway to trip
+        (1.00, 255,  59,  48),   // #FF3B30 at the 1500 K fuel trip
+    ]
+    /// Fuel temperature → color, anchored to FUEL's own normal band (≈900 K) so a
+    /// warm fuel readout means abnormal — not a normal-state amber like colorFor.
+    static func colorForFuel(_ K: Double, trip: Double = 1500) -> Color {
+        if isFlat { return K >= trip ? alarm : (K >= trip * 0.93 ? caution : ink) }
+        return lerpRGB(fuelStops, (K - 900) / 600)
+    }
+
+    private static let fluxStops: [(k: Double, r: Double, g: Double, b: Double)] = [
+        (0.00,  21,  36,  58),   // #15243A subcritical dark
+        (0.33, 122,  74, 107),   // #7A4A6B low-power ember (narrow transition only)
+        (0.66, 232, 144,  42),   // #E8902A power amber
+        (1.00, 255, 210, 122),   // #FFD27A full-power white-hot
+    ]
+    /// Core incandescence by power fraction g∈[0,1] → (center, edge) for a radial
+    /// fill. AUTHENTIC stays flat (equipFill) — flux is shown numerically there.
+    static func fluxGlow(_ g: Double) -> (center: Color, edge: Color) {
+        if isFlat { return (equipFill, equipFill) }
+        return (lerpRGB(fluxStops, g), Color(r: 232, g: 144, b: 42))
+    }
+
+    /// Setpoint deviation → color. Within ±band reads calm; drift warms.
+    /// GUIDED: teal → amber (dev 1–2) → red. AUTHENTIC: ink → caution → alarm.
+    static func setpointDev(_ v: Double, _ sp: Double, _ band: Double) -> Color {
+        let dev = abs(v - sp) / max(1e-9, band)
+        if isFlat { return dev <= 1 ? ink : (dev <= 2 ? caution : alarm) }
+        if dev <= 1 { return Color(r: 70, g: 199, b: 192) }                 // #46C7C0
+        if dev <= 2 { return lerpRGB([(0, 70, 199, 192), (1, 240, 180, 41)], dev - 1) }
+        return Color(r: 255, g: 69, b: 58)                                   // #FF453A
+    }
+
+    // ── Fluid / medium tokens (GUIDED hue; AUTHENTIC graphite process line) ──
+    static var fluidSubcooled: Color { isFlat ? text : Color(r: 47,  g: 111, b: 224) }  // #2F6FE0
+    static var fluidTwoPhase:  Color { isFlat ? text : Color(r: 52,  g: 198, b: 200) }  // #34C6C8
+    static var fluidExhaust:   Color { isFlat ? text : Color(r: 138, g: 147, b: 176) }  // #8A93B0
+    static var fluidFeedwater: Color { isFlat ? text : Color(r: 63,  g: 169, b: 201) }  // #3FA9C9
+    static var fluidHotLeg:    Color { isFlat ? text : Color(r: 70,  g: 199, b: 192) }  // #46C7C0
+
+    // ── Status ladder: alive / off / electrical (off ≠ failed) ──
+    static var statusNormal: Color { isFlat ? normal : Color(r: 39, g: 194, b: 129) }   // #27C281
+    static var deEnergized:  Color { isFlat ? textDim : Color(r: 88, g: 97, b: 115) }   // #586173
+    // Cooler brass-gold, a clear hue step off caution amber (#F0B429) so a synced
+    // generator is never mistaken for a warning.
+    static var elecGold:     Color { isFlat ? text : Color(r: 206, g: 178, b: 96) }     // brass
+    /// Faint structural tint behind instrument docks — the only background tint, toward blue.
+    static var dockTint:     Color { isFlat ? ink.opacity(0.04) : Color(r: 26, g: 42, b: 56).opacity(0.5) }
 }

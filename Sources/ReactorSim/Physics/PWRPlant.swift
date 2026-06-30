@@ -1,5 +1,8 @@
-// PWRPlant.swift — Top-level PWR plant model.
+// PWRPlant.swift — Top-level reactor plant model.
 // Composes PointKinetics + XenonIodine + ThermalHydraulics + DecayHeat.
+// Reactor-kind-agnostic: the same machinery models PWR, BWR (void feedback +
+// direct cycle) and SMR (scaled, natural circulation); the differences live in
+// the injected PlantParams (see PlantParams.bwr()/.smr()).
 
 import Foundation
 
@@ -32,7 +35,10 @@ struct PlantSnapshot {
     var steamPressureMPa:   Double = 1.9
 }
 
-final class PWRPlant {
+/// Back-compatible name — the plant now models every reactor kind via params.
+typealias PWRPlant = ReactorPlant
+
+final class ReactorPlant {
     var params: PlantParams      // var so supervisor can tune boron/external reactivity
     private let kinetics:  PointKinetics
     private let xenon:     XenonIodine
@@ -60,6 +66,10 @@ final class PWRPlant {
         if scrammed { rho += p.scramExtraWorth }
         rho += p.fuelTempCoeff    * (thermal.tFuel - p.nominalFuelTemp)
         rho += p.coolantTempCoeff * (thermal.tAvg  - p.nominalCoolantTemp)
+        // Void feedback (BWR). Referenced to the nominal void so the steady
+        // operating point is unchanged; only deviations contribute. Zero for
+        // subcooled PWR/SMR (voidCoeff = 0).
+        rho += p.voidCoeff        * (thermal.voidFraction - p.nominalVoidFraction)
         rho += xenon.reactivity
         rho += p.externalReactivity
         return max(-0.9, min(p.betaTotal * 1.5, rho))
