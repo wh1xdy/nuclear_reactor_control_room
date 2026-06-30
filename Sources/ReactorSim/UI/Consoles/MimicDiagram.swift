@@ -76,7 +76,6 @@ struct MimicDiagram: View {
         let lpT  = CGRect(x: fx(0.598), y: fy(0.115),  width: fx(0.110), height: fy(0.180))
         let msiv = CGPoint(x: fx(0.405), y: hpT.midY)                       // on the level steam run
         let gen  = CGRect(x: fx(0.730), y: fy(0.160), width: fx(0.075), height: fy(0.100))
-        let xfmr = CGPoint(x: fx(0.852), y: fy(0.210))
 
         let cond  = CGRect(x: fx(0.620), y: fy(0.470), width: fx(0.158), height: fy(0.130))
         let feedY = fy(0.745)
@@ -116,10 +115,8 @@ struct MimicDiagram: View {
         pipe(ctx, [(msr.maxX, msr.midY), (lpT.minX, lpT.midY)], Theme.fluidExhaust, 2)
         // LP exhaust → condenser (start on the sloped casing bottom at midX, not below it).
         pipe(ctx, [(lpT.midX, lpT.maxY - lpT.height * 0.30 * 0.5), (lpT.midX, cond.minY)], Theme.fluidExhaust.opacity(0.85), 3)
-        // Shaft LP → generator → exciter line to transformer (lands on the GSU circle).
+        // Shaft LP → generator (the gen→switchyard lead is drawn with the switchyard).
         pipe(ctx, [(lpT.maxX, lpT.midY), (gen.minX, gen.midY)], Theme.ink.opacity(0.55), 3)
-        pipe(ctx, [(gen.maxX, gen.midY), (xfmr.x - fx(0.015), gen.midY)],
-             sup.turbineTrip ? Theme.deEnergized : Theme.elecGold.opacity(0.6), 2)
 
         // Feed / condensate train: subcooled condensate (blue) becomes pumped
         // feedwater (cyan-blue) after the FW pump — three readable secondary media.
@@ -244,7 +241,7 @@ struct MimicDiagram: View {
         reading(ctx, CGPoint(x: lpT.midX, y: lpT.maxY + fy(0.030)),
                 trip ? "TRIPPED" : "\(rpm) rpm", trip ? Theme.alarm : Theme.textDim, 9, .center)
 
-        // Generator + grid transformer.
+        // Generator (driven off the LP shaft).
         equipBox(ctx, gen, "", trip ? Theme.alarm : nil)
         let gc = CGPoint(x: gen.midX, y: gen.midY)
         ctx.stroke(Path(ellipseIn: CGRect(x: gc.x - fx(0.016), y: gc.y - fx(0.016),
@@ -255,11 +252,8 @@ struct MimicDiagram: View {
         reading(ctx, CGPoint(x: gen.midX, y: gen.maxY + fy(0.032)),
                 trip ? "0 MWe" : String(format: "%.0f MWe", snap.electricPowerW / 1e6),
                 trip ? Theme.alarm : Theme.ink, 13, .center)
-        transformer(ctx, xfmr, r: fx(0.015), live: !trip)
-        txt(ctx, "GRID 400 kV", CGPoint(x: xfmr.x, y: xfmr.y + fy(0.075)), .center, Theme.textDim, 9)
-        txt(ctx, trip ? "OPEN" : "● CLOSED",
-            CGPoint(x: xfmr.x, y: xfmr.y + fy(0.098)), .center,
-            trip ? Theme.textDim : (Theme.isFlat ? Theme.textHdr : Theme.statusNormal), 8)
+        // 400 kV switchyard one-line rising into the top-right corner.
+        drawSwitchyard(ctx, w: W, h: H, gen: gen, snap: snap, sup: sup)
 
         // ════════════════════════════════════════════════════════════════════
         // CONDENSER + FEED TRAIN
@@ -294,7 +288,8 @@ struct MimicDiagram: View {
         drawPrimaryDock(ctx, CGRect(x: fx(0.150), y: fy(0.815), width: fx(0.175), height: fy(0.165)), snap: snap, sup: sup)
         drawSteamCycle(ctx, CGRect(x: fx(0.442), y: fy(0.430), width: fx(0.150), height: fy(0.150)), snap: snap, sup: sup)
         // Fill the lower-right with a dense engineering data page (raw numbers).
-        drawCoreLimits(ctx, CGRect(x: fx(0.420), y: fy(0.805), width: fx(0.565), height: fy(0.175)), snap: snap, sup: sup)
+        // Sits low + clear of the feed-train labels above it.
+        drawCoreLimits(ctx, CGRect(x: fx(0.420), y: fy(0.838), width: fx(0.565), height: fy(0.152)), snap: snap, sup: sup)
     }
 
     // MARK: — instrument docks -------------------------------------------------
@@ -481,102 +476,69 @@ struct MimicDiagram: View {
                sup.turbineTrip ? Theme.alarm : Theme.textDim)
     }
 
-    /// Lower-right dock: a dense engineering DATA PAGE — every advanced reactor /
-    /// thermal / plant number, packed into a tight grid (DCS detail-page style).
-    /// Derived values are directionally correct and honestly labeled.
+    /// Lower-right dock: an engineering DATA PAGE of the advanced reactor / thermal
+    /// numbers — fewer, BIG, readable. Derived values directionally correct + labeled.
     private func drawCoreLimits(_ ctx: GraphicsContext, _ r: CGRect, snap: PlantSnapshot, sup: PlantSupervisor) {
-        dockField(ctx, r, "CORE · THERMAL · PLANT DATA")
-        let pf    = max(0.001, snap.powerFraction)
-        let flow  = max(0.05, Double(sup.primaryFlow) * sup.omegaRCP)
-        let pRat  = max(0.3, sup.pressureMPa / 15.5)
-        let tFac  = max(0.5, 1 - (snap.coolantTempK - 550) / 130)
-        let dnbr  = min(9.99, (flow.squareRoot() / pf.squareRoot()) * pRat * tFac * 1.93)
-        let ao    = -snap.rodPosition * 32 + (1 - flow) * 6
-        let lhr   = 13.0 * pf * (1 + abs(ao) / 110)
-        let qptr  = 1.00 + abs(ao) / 1800
-        let pct   = snap.coolantTempK + 80 * pf + max(0, snap.fuelTempK - 900) * 0.4
-        let fuelCL = snap.fuelTempK + 230 * pf
+        dockField(ctx, r, "CORE · THERMAL DATA")
+        let pf   = max(0.001, snap.powerFraction)
+        let flow = max(0.05, Double(sup.primaryFlow) * sup.omegaRCP)
+        let pRat = max(0.3, sup.pressureMPa / 15.5)
+        let tFac = max(0.5, 1 - (snap.coolantTempK - 550) / 130)
+        let dnbr = min(9.99, (flow.squareRoot() / pf.squareRoot()) * pRat * tFac * 1.93)
+        let ao   = -snap.rodPosition * 32 + (1 - flow) * 6
+        let lhr  = 13.0 * pf * (1 + abs(ao) / 110)
+        let qptr = 1.00 + abs(ao) / 1800
+        let pct  = snap.coolantTempK + 80 * pf + max(0, snap.fuelTempK - 900) * 0.4
         let subcool = tsatK(sup.pressureMPa) - snap.hotLegTempK
-        let pcm   = snap.reactivity * 1e5
-        let xeW   = -1.6 * snap.xenonInventory
-        let borW  = -8e-5 * (sup.boronPPM - 800) * 1e5
-        let rcsKgs = 18_800.0 * flow
-        let stmKgs = snap.scrammed ? 0 : 1_650.0 * pf
-        let fwKgs  = sup.feedwaterFault ? 0 : 1_650.0 * Double(sup.feedwaterValve) / 0.70
-        let condKPa = magnusKPa(sup.condTempK)
-        let mwe   = snap.electricPowerW / 1e6
-        let eta   = snap.thermalPowerW > 1 ? mwe / (snap.thermalPowerW / 1e6) * 100 : 0
-        let pzrL  = max(5, min(95, 25 + 35 * (snap.coolantTempK - 530) / 20))
-        let sgL   = max(8, min(92, sup.feedwaterInv * 62))
-        let sdm   = max(0, 5.2 - snap.rodPosition * 1.5)
-        // SUR / period from the recent power history (rough but live).
+        let pcm  = snap.reactivity * 1e5
+        let sdm  = max(0, 5.2 - snap.rodPosition * 1.5)
+        let sgL  = max(8, min(92, sup.feedwaterInv * 62))
+        let mwe  = snap.electricPowerW / 1e6
+        let eta  = snap.thermalPowerW > 1 ? mwe / (snap.thermalPowerW / 1e6) * 100 : 0
         let hp = sup.orderedHistory(sup.histPower)
         let p1 = hp.last ?? 100, p0 = hp.count > 50 ? hp[hp.count - 50] : p1
         let rate = (p1 > 0.1 && p0 > 0.1) ? (p1 - p0) / max(0.1, p0) : 0
         let period = abs(rate) < 0.0015 ? 999.0 : min(999, 0.8 / abs(rate))
-        let cAlarm = { (cond: Bool) in cond ? Theme.alarm : Theme.ink }
+        let cA = { (c: Bool) in c ? Theme.alarm : Theme.ink }
         let dnbrC = dnbr < 1.30 ? Theme.alarm : dnbr < 1.55 ? Theme.caution : Theme.statusNormal
-        let subC  = subcool < 15 ? Theme.alarm : subcool < 30 ? Theme.caution : Theme.statusNormal
 
         let items: [(String, String, Color)] = [
-            ("SUR",     String(format: "%+.1f dpm", rate * 60), Theme.ink),
-            ("PERIOD",  period >= 999 ? "∞ s" : String(format: "%.0f s", period), Theme.ink),
-            ("FLUX",    String(format: "%.0f%%", pf * 100), Theme.ink),
-            ("ρ NET",   fmtPcm(pcm), abs(pcm) > 100 ? Theme.caution : Theme.ink),
-            ("ρ XE",    fmtPcm(xeW), Theme.ink),
-            ("ρ BORON", fmtPcm(borW), Theme.ink),
-            ("SDM",     String(format: "%.1f%%Δk", sdm), sdm < 1.3 ? Theme.alarm : Theme.ink),
-            ("CBC",     String(format: "%.0f ppm", sup.boronPPM), Theme.ink),
-            ("DNBR",    String(format: "%.2f", dnbr), dnbrC),
-            ("PEAK LHR", String(format: "%.1f kW/ft", lhr), cAlarm(lhr > 20)),
-            ("Fq",      String(format: "%.2f", 2.05 + abs(ao) / 90), Theme.ink),
-            ("FΔH",     String(format: "%.2f", 1.55 + abs(ao) / 220), Theme.ink),
+            ("DNBR",     String(format: "%.2f", dnbr), dnbrC),
+            ("PK LHR",   String(format: "%.1f", lhr) + " kW/ft", cA(lhr > 20)),
             ("AXIAL ΔI", String(format: "%+.0f%%", ao), abs(ao) > 15 ? Theme.caution : Theme.ink),
-            ("QPTR",    String(format: "%.3f", qptr), cAlarm(qptr > 1.02)),
-            ("PEAK CLAD", String(format: "%.0f K", pct), cAlarm(pct > 1200)),
-            ("FUEL AVG", String(format: "%.0f K", snap.fuelTempK), Theme.ink),
-            ("FUEL CL", String(format: "%.0f K", fuelCL), Theme.ink),
-            ("MTC",     "-30 pcm/K", Theme.ink),
-            ("FTC",     "-2.0 pcm/K", Theme.ink),
-            ("T-HOT",   String(format: "%.0f K", snap.hotLegTempK), Theme.ink),
-            ("T-COLD",  String(format: "%.0f K", snap.coldLegTempK), Theme.ink),
-            ("T-AVG",   String(format: "%.1f K", snap.coolantTempK), Theme.ink),
-            ("T-REF",   "550 K", Theme.ink),
-            ("ΔT",      String(format: "%.0f K", snap.hotLegTempK - snap.coldLegTempK), Theme.ink),
-            ("SUBCOOL", String(format: "%.0f K", subcool), subC),
-            ("RCS-P",   String(format: "%.2f MPa", sup.pressureMPa), Theme.ink),
-            ("PZR LVL", String(format: "%.0f%%", pzrL), Theme.ink),
-            ("RCS FLOW", String(format: "%.0f kg/s", rcsKgs), Theme.ink),
-            ("RCP ΔP",  String(format: "%.2f MPa", 0.62 * sup.omegaRCP * sup.omegaRCP), Theme.ink),
-            ("CHG/LET", "28 / 28", Theme.ink),
-            ("SG-P",    String(format: "%.2f MPa", snap.steamPressureMPa), Theme.ink),
-            ("SG LVL",  String(format: "%.0f%%", sgL), sgL < 20 ? Theme.alarm : Theme.ink),
-            ("STM",     String(format: "%.0f kg/s", stmKgs), Theme.ink),
-            ("FW",      String(format: "%.0f kg/s", fwKgs), sup.feedwaterFault ? Theme.alarm : Theme.ink),
-            ("STM-FW",  String(format: "%+.0f", fwKgs - stmKgs), Theme.ink),
-            ("COND",    String(format: "%.1f kPa", condKPa), Theme.ink),
-            ("COND T",  String(format: "%.0f K", sup.condTempK), Theme.ink),
-            ("GROSS",   String(format: "%.0f MWe", mwe), Theme.elecGold),
-            ("MVAr",    String(format: "%.0f", mwe * 0.43), Theme.elecGold),
-            ("GRID Hz", sup.turbineTrip ? "--.--" : "50.00", Theme.ink),
-            ("CYCLE η", String(format: "%.1f%%", eta), Theme.ink),
-            ("DECAY",   String(format: "%.1f%%", snap.decayHeatFraction * 100), Theme.ink),
+            ("PK CLAD",  String(format: "%.0f K", pct), cA(pct > 1200)),
+            ("QPTR",     String(format: "%.3f", qptr), cA(qptr > 1.02)),
+            ("SUR",      String(format: "%+.1f dpm", rate * 60), Theme.ink),
+            ("PERIOD",   period >= 999 ? "∞ s" : String(format: "%.0f s", period), Theme.ink),
+            ("ρ NET",    fmtPcm(pcm), abs(pcm) > 100 ? Theme.caution : Theme.ink),
+            ("SDM",      String(format: "%.1f%%Δk", sdm), sdm < 1.3 ? Theme.alarm : Theme.ink),
+            ("BORON",    String(format: "%.0f ppm", sup.boronPPM), Theme.ink),
+            ("T-HOT",    String(format: "%.0f K", snap.hotLegTempK), Theme.ink),
+            ("T-COLD",   String(format: "%.0f K", snap.coldLegTempK), Theme.ink),
+            ("ΔT",       String(format: "%.0f K", snap.hotLegTempK - snap.coldLegTempK), Theme.ink),
+            ("SUBCOOL",  String(format: "%.0f K", subcool), subcool < 15 ? Theme.alarm : subcool < 30 ? Theme.caution : Theme.ink),
+            ("RCS-P",    String(format: "%.1f MPa", sup.pressureMPa), Theme.ink),
+            ("RCS FLOW", String(format: "%.0f", 18_800 * flow), Theme.ink),
+            ("SG-P",     String(format: "%.1f MPa", snap.steamPressureMPa), Theme.ink),
+            ("SG LVL",   String(format: "%.0f%%", sgL), sgL < 20 ? Theme.alarm : Theme.ink),
+            ("GROSS",    String(format: "%.0f MWe", mwe), Theme.elecGold),
+            ("CYCLE η",  String(format: "%.1f%%", eta), Theme.ink),
         ]
 
-        let cols = 6
-        let rpc = (items.count + cols - 1) / cols
-        let gx: CGFloat = 8
+        let cols = 4
+        let rpc = (items.count + cols - 1) / cols       // 5 rows
+        let gx: CGFloat = 10
         let colW = (r.width - gx * 2) / CGFloat(cols)
-        let top = r.minY + 19
+        let top = r.minY + 18
         let rowH = (r.maxY - top - 5) / CGFloat(rpc)
         for (i, it) in items.enumerated() {
             let col = i / rpc, row = i % rpc
             let cx = r.minX + gx + CGFloat(col) * colW
             let cy = top + CGFloat(row) * rowH + rowH / 2
-            ctx.draw(Text(it.0).font(.system(size: 7, design: .monospaced)).foregroundColor(Theme.textDim),
+            ctx.draw(Text(it.0).font(.system(size: 9, design: .monospaced)).foregroundColor(Theme.textDim),
                      at: CGPoint(x: cx, y: cy), anchor: .leading)
-            ctx.draw(Text(it.1).font(.system(size: 7, weight: .semibold, design: .monospaced)).foregroundColor(it.2),
-                     at: CGPoint(x: cx + colW - 5, y: cy), anchor: .trailing)
+            ctx.draw(Text(it.1).font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundColor(it.2),
+                     at: CGPoint(x: cx + colW - 24, y: cy), anchor: .trailing)
         }
     }
 
@@ -838,9 +800,82 @@ struct MimicDiagram: View {
     }
 
     private func transformer(_ ctx: GraphicsContext, _ c: CGPoint, r: CGFloat, live: Bool) {
-        let col = Theme.ink.opacity(0.5)
-        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r*2, height: r*2)), with: .color(col), lineWidth: 1.2)
-        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r*0.2, width: r*2, height: r*2)), with: .color(col), lineWidth: 1.2)
+        let col = (live ? Theme.elecGold : Theme.deEnergized).opacity(0.85)
+        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r*2, height: r*2)), with: .color(col), lineWidth: 1.3)
+        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r*0.2, width: r*2, height: r*2)), with: .color(col), lineWidth: 1.3)
+    }
+
+    /// 400 kV switchyard one-line filling the top-right corner: generator breaker
+    /// 52G → GSU transformer → HV bus → two transmission feeders (LINE 1 in
+    /// service, LINE 2 on standby). Shows component + breaker states plus the
+    /// headline grid numbers (kV / Hz / kA). Brass when energized; the gen side
+    /// de-energizes on a unit trip while the 400 kV grid bus stays live. All
+    /// colour collapses to graphite in the AUTHENTIC skins.
+    private func drawSwitchyard(_ ctx: GraphicsContext, w: CGFloat, h: CGFloat,
+                                gen: CGRect, snap: PlantSnapshot, sup: PlantSupervisor) {
+        func fx(_ v: CGFloat) -> CGFloat { v * w }
+        func fy(_ v: CGFloat) -> CGFloat { v * h }
+        let trip = sup.turbineTrip
+        let live = trip ? Theme.deEnergized : Theme.elecGold     // gen-side path
+        let bus  = Theme.elecGold                                 // 400 kV grid: always live
+        let stby = Theme.deEnergized.opacity(0.55)               // standby feeder
+        let okC  = Theme.isFlat ? Theme.textHdr : Theme.statusNormal
+
+        let cx   = fx(0.852)
+        let xfY  = fy(0.184), xfR = fx(0.013)
+        let gbY  = fy(0.148)
+        let busY = fy(0.118)
+        let busL = fx(0.828), busR = fx(0.966)
+        let fA   = fx(0.873), fB = fx(0.938)
+        let brkY = fy(0.085)
+        let topY = fy(0.054)
+
+        // Generator output lead → GSU low side.
+        pipe(ctx, [(gen.maxX, gen.midY), (cx, gen.midY), (cx, xfY + xfR)], live, 2)
+        // GSU transformer (two-winding).
+        transformer(ctx, CGPoint(x: cx, y: xfY), r: xfR, live: !trip)
+        txt(ctx, "GSU 21/400kV", CGPoint(x: cx + xfR + fx(0.005), y: xfY), .leading, Theme.textDim, 7)
+        // GSU high side → generator breaker 52G → HV bus.
+        pipe(ctx, [(cx, xfY - xfR), (cx, busY)], trip ? stby : bus, 2)
+        breaker(ctx, CGPoint(x: cx, y: gbY), closed: !trip, color: trip ? Theme.deEnergized : bus)
+        txt(ctx, "52G", CGPoint(x: cx + fx(0.009), y: gbY), .leading, Theme.textDim, 7)
+        // HV busbar — the 400 kV grid (stays energized on a unit trip).
+        ctx.stroke(Path { p in p.move(to: CGPoint(x: busL, y: busY)); p.addLine(to: CGPoint(x: busR, y: busY)) },
+                   with: .color(bus), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        txt(ctx, "400 kV", CGPoint(x: busL, y: busY - fy(0.017)), .leading, Theme.textHdr, 8)
+        txt(ctx, trip ? "—.—— Hz" : "50.00 Hz", CGPoint(x: busR, y: busY - fy(0.017)), .trailing, okC, 8)
+        // Two transmission feeders off the bus.
+        let kA = snap.electricPowerW / (1.732 * 400e3 * 0.92) / 1000
+        for (i, x) in [fA, fB].enumerated() {
+            let inSvc = i == 0
+            let lc = inSvc ? bus : stby
+            pipe(ctx, [(x, busY), (x, topY + 5)], lc, inSvc ? 2 : 1.5)
+            breaker(ctx, CGPoint(x: x, y: brkY), closed: inSvc && !trip,
+                    color: inSvc ? (trip ? Theme.deEnergized : bus) : Theme.deEnergized)
+            txt(ctx, inSvc ? (trip ? "OPEN" : String(format: "%.2f kA", kA)) : "STBY",
+                CGPoint(x: x + fx(0.009), y: brkY), .leading,
+                inSvc && trip ? Theme.caution : Theme.textDim, 7)
+            tower(ctx, CGPoint(x: x, y: topY), color: lc)
+            txt(ctx, "LINE \(i + 1)", CGPoint(x: x, y: topY - fy(0.017)), .center, Theme.textDim, 7)
+        }
+    }
+
+    /// Switchyard breaker (IEEE square): filled = closed, hollow = open.
+    private func breaker(_ ctx: GraphicsContext, _ c: CGPoint, closed: Bool, color: Color) {
+        let s: CGFloat = 7
+        let p = Path(roundedRect: CGRect(x: c.x - s/2, y: c.y - s/2, width: s, height: s), cornerRadius: 1.5)
+        if closed { ctx.fill(p, with: .color(color)) }
+        else { ctx.fill(p, with: .color(Theme.equipFill)); ctx.stroke(p, with: .color(color), lineWidth: 1.3) }
+    }
+
+    /// Transmission-line terminal: an arrowhead toward the grid + a short cap.
+    private func tower(_ ctx: GraphicsContext, _ c: CGPoint, color: Color) {
+        let a: CGFloat = 5
+        ctx.stroke(Path { p in
+            p.move(to: CGPoint(x: c.x - a, y: c.y + a)); p.addLine(to: CGPoint(x: c.x, y: c.y)); p.addLine(to: CGPoint(x: c.x + a, y: c.y + a))
+        }, with: .color(color), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
+        ctx.stroke(Path { p in p.move(to: CGPoint(x: c.x - a, y: c.y)); p.addLine(to: CGPoint(x: c.x + a, y: c.y)) },
+                   with: .color(color.opacity(0.55)), lineWidth: 1.2)
     }
 
     private func condenser(_ ctx: GraphicsContext, _ r: CGRect, vacOK: Bool) {
