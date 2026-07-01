@@ -305,12 +305,12 @@ struct MimicDiagram: View {
         // Electrical picture tucked 4 px under the GSU transformer circles (the
         // lower circle bottom = gen.midY + xfR), beside the generator. Computed in
         // px, not a fixed fraction, so the 4 px gap holds at any window size.
-        let elecTop  = gen.midY + fx(0.013) + 4
-        let elecRect = CGRect(x: fx(0.815), y: elecTop, width: fx(0.170), height: fy(0.250))
+        let elecTop  = gen.midY + fx(0.013) + 10
+        let elecRect = CGRect(x: fx(0.808), y: elecTop, width: fx(0.170), height: fy(0.250))
         drawElectricalDock(ctx, elecRect, snap: snap, sup: sup, t: t)
-        // Under it: turbine-generator mechanical + excitation, filling down to the data page.
-        let tgTop = elecRect.maxY + fy(0.012)
-        drawTurbineGen(ctx, CGRect(x: fx(0.815), y: tgTop, width: fx(0.170), height: fy(0.824) - tgTop), snap: snap, sup: sup)
+        // Turbine-generator dock stays put — the gap above it (from lifting the
+        // electrical dock) is intentional breathing room.
+        drawTurbineGen(ctx, CGRect(x: fx(0.815), y: fy(0.562), width: fx(0.170), height: fy(0.242)), snap: snap, sup: sup)
         // Fill the empty bottom-left (primary loop) and the centre void (steam cycle).
         drawPrimaryDock(ctx, CGRect(x: fx(0.150), y: fy(0.815), width: fx(0.175), height: fy(0.165)), snap: snap, sup: sup)
         drawSteamCycle(ctx, CGRect(x: fx(0.442), y: fy(0.430), width: fx(0.150), height: fy(0.150)), snap: snap, sup: sup)
@@ -950,10 +950,6 @@ struct MimicDiagram: View {
             ("STAT T",   String(format: "%.0f°C", statT), statT > 110 ? Theme.caution : Theme.ink),
             ("THRUST",   String(format: "%.0f%%", 22 + 46 * load), Theme.ink),
             ("STAT I",   trip ? "0 kA" : String(format: "%.1f kA", statI), Theme.ink),
-            ("FIELD V",  trip ? "0 V"  : String(format: "%.0f V", 250 + 150 * load), Theme.ink),
-            ("SEAL OIL", "4.5 bar", Theme.ink),
-            ("FIELD A",  trip ? "0 A"  : String(format: "%.0f A", 2400 + 1400 * load), Theme.ink),
-            ("GAS T",    String(format: "%.0f°C", 40 + 6 * load), Theme.ink),
         ]
         let cols = 2, rpc = (items.count + cols - 1) / cols
         let gx: CGFloat = 8
