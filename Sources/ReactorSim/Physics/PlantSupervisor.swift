@@ -34,6 +34,16 @@ final class PlantSupervisor {
     var pumpDegraded:    Bool   = false
     var feedwaterFault:  Bool   = false
 
+    // MARK: — Switchyard breakers (operator-toggleable on the mimic one-line).
+    // 52G = generator breaker; line1/line2 = the two 400 kV outgoing circuits.
+    var genBreakerOpen:   Bool  = false
+    var line1BreakerOpen: Bool  = false
+    var line2BreakerOpen: Bool  = false
+
+    // Sim-clock pause (Esc). Lives here (a reference type) so the 60 Hz timer,
+    // which captures the ContentView struct, reads it live rather than stale.
+    var simPaused:        Bool  = false
+
     // MARK: — Automation (all default OFF — manual operation is the trainer's
     // baseline; auto control is the realistic option, not the default)
     var rodAutoEnabled:  Bool   = false   // holds RCS T-avg at 550 K
@@ -168,7 +178,25 @@ final class PlantSupervisor {
         // Demand follows actual position after a trip reset: rods stay inserted
         // until the operator deliberately withdraws (real CRDM behavior).
         rodPosition = snapshot.rodPosition
+        // Re-close the switchyard so the unit can resync after a reset.
+        genBreakerOpen = false; line1BreakerOpen = false; line2BreakerOpen = false
         scramMessage = "SCRAM RESET APPROVED"
+    }
+
+    // MARK: — Switchyard breaker operation
+    /// Opening the generator breaker while synchronised is a load rejection —
+    /// the turbine trips (no electrical load → overspeed protection).
+    func toggleGenBreaker() {
+        genBreakerOpen.toggle()
+        if genBreakerOpen && !turbineTrip { turbineTrip = true }
+    }
+    /// One outgoing circuit is redundant (the other carries full load). Opening
+    /// BOTH with the generator breaker closed is a full load rejection → trip.
+    func toggleLineBreaker(_ i: Int) {
+        if i == 0 { line1BreakerOpen.toggle() } else { line2BreakerOpen.toggle() }
+        if line1BreakerOpen && line2BreakerOpen && !genBreakerOpen && !turbineTrip {
+            turbineTrip = true
+        }
     }
 
     func acknowledgeAllAlarms() {

@@ -79,6 +79,16 @@ struct ContentView: View {
             SettingsView(console: console, skin: skinBinding, reactor: reactor,
                          onClose: { showSettings = false })
         }
+        .overlay {
+            if supervisor.simPaused {
+                PauseMenu(
+                    speed: timeSpeed,
+                    onResume:   { supervisor.simPaused = false },
+                    onSettings: { supervisor.simPaused = false; showSettings = true },
+                    onReset:    { supervisor = PlantSupervisor(kind: reactor.wrappedValue.kind)
+                                  startPhysics() })
+            }
+        }
     }
 
     @ViewBuilder
@@ -101,6 +111,7 @@ struct ContentView: View {
         // tracking and would freeze physics during drags.
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [self] _ in
             MainActor.assumeIsolated {
+                guard !self.supervisor.simPaused else { return }   // pause freezes the physics clock (read live off the supervisor)
                 self.supervisor.step(dt: 1.0 / 60.0 * Double(self.timeSpeed))
             }
         }
@@ -120,6 +131,10 @@ struct ContentView: View {
     private func startKeyMonitor() {
         if keyMonitor != nil { return }          // already registered
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
+            // Esc → pause menu (space is SCRAM). Skip while the settings sheet is up.
+            if event.keyCode == 53 && !showSettings {
+                supervisor.simPaused.toggle(); return nil
+            }
             handleKey(event)
             return event
         }
@@ -169,5 +184,55 @@ struct ContentView: View {
             default: break
             }
         }
+    }
+}
+
+// MARK: — Pause overlay (Esc)
+
+private struct PauseMenu: View {
+    let speed: Int
+    let onResume:   () -> Void
+    let onSettings: () -> Void
+    let onReset:    () -> Void
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.black.opacity(0.55)).ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onResume)          // click backdrop to resume
+            VStack(spacing: 4) {
+                Text("PAUSED").font(.system(size: 24, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Theme.textHdr).tracking(3)
+                Text("simulation clock frozen · was ×\(speed)")
+                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.textDim)
+                VStack(spacing: 8) {
+                    row("RESUME", "esc", onResume)
+                    row("SETTINGS", ",", onSettings)
+                    row("RESET PLANT", "R", onReset)
+                }
+                .padding(.top, 16)
+            }
+            .padding(30)
+            .frame(width: 320)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Theme.panel))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.border, lineWidth: 1))
+        }
+    }
+
+    private func row(_ title: String, _ key: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title).font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.ink)
+                Spacer()
+                Text(key).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.textDim)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 9).fill(Theme.dockTint))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.border.opacity(0.6), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
