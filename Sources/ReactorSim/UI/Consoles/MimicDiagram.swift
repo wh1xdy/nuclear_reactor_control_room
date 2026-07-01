@@ -822,7 +822,8 @@ struct MimicDiagram: View {
         let okC  = Theme.isFlat ? Theme.textHdr : Theme.statusNormal
 
         let cx   = fx(0.852)
-        let xfY  = fy(0.184), xfR = fx(0.013)
+        let xfR  = fx(0.013)
+        let xfY  = gen.midY - 0.8 * xfR   // lower winding centred on the gen-lead line → clean side entry
         let gbY  = fy(0.148)
         let busY = fy(0.118)
         let busL = fx(0.828), busR = fx(0.966)
@@ -830,12 +831,13 @@ struct MimicDiagram: View {
         let brkY = fy(0.085)
         let topY = fy(0.054)
 
-        // Generator output lead → GSU low side.
-        pipe(ctx, [(gen.maxX, gen.midY), (cx, gen.midY), (cx, xfY + xfR)], live, 2)
+        // Generator output lead → GSU low-voltage winding. One straight run into
+        // the lower circle's edge — no bend, so no chamfer artifact at the joint.
+        pipe(ctx, [(gen.maxX, gen.midY), (cx - xfR, gen.midY)], live, 2)
         // GSU transformer (two-winding).
         transformer(ctx, CGPoint(x: cx, y: xfY), r: xfR, live: !trip)
         txt(ctx, "GSU 21/400kV", CGPoint(x: cx + xfR + fx(0.005), y: xfY), .leading, Theme.textDim, 7)
-        // GSU high side → generator breaker 52G → HV bus.
+        // GSU HV winding → generator breaker 52G → HV bus (single vertical run).
         pipe(ctx, [(cx, xfY - xfR), (cx, busY)], trip ? stby : bus, 2)
         breaker(ctx, CGPoint(x: cx, y: gbY), closed: !trip, color: trip ? Theme.deEnergized : bus)
         txt(ctx, "52G", CGPoint(x: cx + fx(0.009), y: gbY), .leading, Theme.textDim, 7)
