@@ -284,6 +284,8 @@ struct MimicDiagram: View {
         drawMarginsStrip(ctx, CGRect(x: fx(0.420), y: fy(0.034), width: fx(0.395), height: fy(0.060)), snap: snap, sup: sup)
         drawNeutronicsDock(ctx, CGRect(x: fx(0.012), y: fy(0.045), width: fx(0.140), height: fy(0.205)), snap: snap, sup: sup)
         drawElectricalDock(ctx, CGRect(x: fx(0.806), y: fy(0.330), width: fx(0.172), height: fy(0.250)), snap: snap, sup: sup, t: t)
+        // Under the electrical picture: turbine-generator mechanical + excitation.
+        drawTurbineGen(ctx, CGRect(x: fx(0.806), y: fy(0.594), width: fx(0.172), height: fy(0.230)), snap: snap, sup: sup)
         // Fill the empty bottom-left (primary loop) and the centre void (steam cycle).
         drawPrimaryDock(ctx, CGRect(x: fx(0.150), y: fy(0.815), width: fx(0.175), height: fy(0.165)), snap: snap, sup: sup)
         drawSteamCycle(ctx, CGRect(x: fx(0.442), y: fy(0.430), width: fx(0.150), height: fy(0.150)), snap: snap, sup: sup)
@@ -844,19 +846,20 @@ struct MimicDiagram: View {
         // HV busbar — the 400 kV grid (stays energized on a unit trip).
         ctx.stroke(Path { p in p.move(to: CGPoint(x: busL, y: busY)); p.addLine(to: CGPoint(x: busR, y: busY)) },
                    with: .color(bus), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-        txt(ctx, "400 kV", CGPoint(x: busL, y: busY - fy(0.017)), .leading, Theme.textHdr, 8)
+        txt(ctx, "400 kV 3\u{03C6}", CGPoint(x: busL, y: busY - fy(0.017)), .leading, Theme.textHdr, 8)
         txt(ctx, trip ? "—.—— Hz" : "50.00 Hz", CGPoint(x: busR, y: busY - fy(0.017)), .trailing, okC, 8)
-        // Two transmission feeders off the bus.
-        let kA = snap.electricPowerW / (1.732 * 400e3 * 0.92) / 1000
+        // Two 400 kV circuits, BOTH in service, sharing the export current — the
+        // reason there are two is redundancy, not a spare you toggle. A one-line
+        // draws each 3-phase circuit as a single conductor + the 3φ tick marks.
+        let kAeach = trip ? 0 : snap.electricPowerW / (1.732 * 400e3 * 0.92) / 2000
         for (i, x) in [fA, fB].enumerated() {
-            let inSvc = i == 0
-            let lc = inSvc ? bus : stby
-            pipe(ctx, [(x, busY), (x, topY + 5)], lc, inSvc ? 2 : 1.5)
-            breaker(ctx, CGPoint(x: x, y: brkY), closed: inSvc && !trip,
-                    color: inSvc ? (trip ? Theme.deEnergized : bus) : Theme.deEnergized)
-            txt(ctx, inSvc ? (trip ? "OPEN" : String(format: "%.2f kA", kA)) : "STBY",
+            let lc = trip ? stby : bus
+            pipe(ctx, [(x, busY), (x, topY + 5)], lc, 2)
+            phaseTicks(ctx, CGPoint(x: x, y: (busY + brkY) / 2), color: lc)
+            breaker(ctx, CGPoint(x: x, y: brkY), closed: !trip, color: trip ? Theme.deEnergized : bus)
+            txt(ctx, trip ? "OPEN" : String(format: "%.2f kA", kAeach),
                 CGPoint(x: x + fx(0.009), y: brkY), .leading,
-                inSvc && trip ? Theme.caution : Theme.textDim, 7)
+                trip ? Theme.caution : Theme.textDim, 7)
             tower(ctx, CGPoint(x: x, y: topY), color: lc)
             txt(ctx, "LINE \(i + 1)", CGPoint(x: x, y: topY - fy(0.017)), .center, Theme.textDim, 7)
         }
@@ -878,6 +881,60 @@ struct MimicDiagram: View {
         }, with: .color(color), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
         ctx.stroke(Path { p in p.move(to: CGPoint(x: c.x - a, y: c.y)); p.addLine(to: CGPoint(x: c.x + a, y: c.y)) },
                    with: .color(color.opacity(0.55)), lineWidth: 1.2)
+    }
+
+    /// Three-phase tick marks: three short diagonal strokes across a (vertical)
+    /// conductor — the one-line convention that a single line carries 3 phases.
+    private func phaseTicks(_ ctx: GraphicsContext, _ c: CGPoint, color: Color) {
+        let gap: CGFloat = 3.5, len: CGFloat = 3.6
+        for k in 0..<3 {
+            let yy = c.y - 3.5 + CGFloat(k) * gap
+            ctx.stroke(Path { p in
+                p.move(to: CGPoint(x: c.x - len, y: yy + len)); p.addLine(to: CGPoint(x: c.x + len, y: yy - len))
+            }, with: .color(color), lineWidth: 1.1)
+        }
+    }
+
+    /// Right dock under the electrical picture: turbine-generator mechanical +
+    /// excitation supervision. The physics model doesn't simulate bearings / H₂
+    /// cooling, so these are representative instrument values that track load and
+    /// trip state — labeled honestly, same spirit as the other supervisory reads.
+    private func drawTurbineGen(_ ctx: GraphicsContext, _ r: CGRect, snap: PlantSnapshot, sup: PlantSupervisor) {
+        dockField(ctx, r, "TURBINE-GENERATOR")
+        let trip = sup.turbineTrip
+        let mwe  = snap.electricPowerW / 1e6
+        let load = max(0, min(1, mwe / 990))
+        let brgT = 60 + 32 * load
+        let statT = 55 + 42 * load
+        let statI = trip ? 0 : mwe / (1.732 * 21.0 * 0.92)     // kA at the 21 kV terminals
+        let items: [(String, String, Color)] = [
+            ("SPEED",    trip ? "0 rpm" : "3000 rpm", trip ? Theme.alarm : Theme.ink),
+            ("BRG MTL",  String(format: "%.0f°C", brgT), brgT > 105 ? Theme.caution : Theme.ink),
+            ("O/SPD",    "3300 rpm", Theme.textDim),
+            ("LUBE",     "2.1 bar", Theme.ink),
+            ("VIB",      String(format: "%.1f mil", 1.1 + 0.7 * load), Theme.ink),
+            ("H2 P",     "4.0 bar", Theme.ink),
+            ("ECC",      String(format: "%.2f mil", 0.30 + 0.12 * load), Theme.ink),
+            ("H2 PUR",   "98.5%", Theme.ink),
+            ("DIFF EXP", String(format: "%+.1f mm", -0.4 + 1.6 * load), Theme.ink),
+            ("STAT T",   String(format: "%.0f°C", statT), statT > 110 ? Theme.caution : Theme.ink),
+            ("THRUST",   String(format: "%.0f%%", 22 + 46 * load), Theme.ink),
+            ("STAT I",   trip ? "0 kA" : String(format: "%.1f kA", statI), Theme.ink),
+        ]
+        let cols = 2, rpc = (items.count + cols - 1) / cols
+        let gx: CGFloat = 8
+        let colW = (r.width - gx * 2) / CGFloat(cols)
+        let top = r.minY + 20
+        let rowH = (r.maxY - top - 6) / CGFloat(rpc)
+        for (i, it) in items.enumerated() {
+            let col = i % cols, row = i / cols
+            let cx = r.minX + gx + CGFloat(col) * colW
+            let cy = top + CGFloat(row) * rowH + rowH / 2
+            ctx.draw(Text(it.0).font(.system(size: 8, design: .monospaced)).foregroundColor(Theme.textDim),
+                     at: CGPoint(x: cx, y: cy), anchor: .leading)
+            ctx.draw(Text(it.1).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(it.2),
+                     at: CGPoint(x: cx + colW - 14, y: cy), anchor: .trailing)
+        }
     }
 
     private func condenser(_ ctx: GraphicsContext, _ r: CGRect, vacOK: Bool) {
