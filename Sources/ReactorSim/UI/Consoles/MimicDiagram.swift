@@ -16,13 +16,32 @@ struct MimicDiagram: View {
     let supervisor: PlantSupervisor
 
     var body: some View {
-        TimelineView(.animation) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            Canvas { ctx, size in
-                draw(ctx, size, snap: supervisor.snapshot, sup: supervisor, t: t)
+        GeometryReader { geo in
+            TimelineView(.animation) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                Canvas { ctx, size in
+                    draw(ctx, size, snap: supervisor.snapshot, sup: supervisor, t: t)
+                }
             }
+            .contentShape(Rectangle())
+            .gesture(SpatialTapGesture().onEnded { ev in
+                handleTap(ev.location, size: geo.size)
+            })
         }
         .background(Theme.schematicBg)
+    }
+
+    /// Operator taps on the mimic. Currently the switchyard breakers are live —
+    /// hit boxes must track the positions drawn in drawSwitchyard (52G / feeders).
+    private func handleTap(_ p: CGPoint, size: CGSize) {
+        let w = size.width, h = size.height
+        let hitR: CGFloat = 15
+        let g52 = CGPoint(x: 0.852 * w, y: 0.148 * h)   // 52G generator breaker
+        let l1  = CGPoint(x: 0.873 * w, y: 0.085 * h)   // LINE 1 breaker
+        let l2  = CGPoint(x: 0.938 * w, y: 0.085 * h)   // LINE 2 breaker
+        if      hypot(p.x - g52.x, p.y - g52.y) < hitR { supervisor.toggleGenBreaker() }
+        else if hypot(p.x - l1.x,  p.y - l1.y)  < hitR { supervisor.toggleLineBreaker(0) }
+        else if hypot(p.x - l2.x,  p.y - l2.y)  < hitR { supervisor.toggleLineBreaker(1) }
     }
 
     private func draw(_ ctx: GraphicsContext, _ size: CGSize,
@@ -283,9 +302,15 @@ struct MimicDiagram: View {
         // ════════════════════════════════════════════════════════════════════
         drawMarginsStrip(ctx, CGRect(x: fx(0.420), y: fy(0.034), width: fx(0.395), height: fy(0.060)), snap: snap, sup: sup)
         drawNeutronicsDock(ctx, CGRect(x: fx(0.012), y: fy(0.045), width: fx(0.140), height: fy(0.205)), snap: snap, sup: sup)
-        drawElectricalDock(ctx, CGRect(x: fx(0.806), y: fy(0.330), width: fx(0.172), height: fy(0.250)), snap: snap, sup: sup, t: t)
-        // Under the electrical picture: turbine-generator mechanical + excitation.
-        drawTurbineGen(ctx, CGRect(x: fx(0.806), y: fy(0.594), width: fx(0.172), height: fy(0.230)), snap: snap, sup: sup)
+        // Electrical picture tucked 4 px under the GSU transformer circles (the
+        // lower circle bottom = gen.midY + xfR), beside the generator. Computed in
+        // px, not a fixed fraction, so the 4 px gap holds at any window size.
+        let elecTop  = gen.midY + fx(0.013) + 4
+        let elecRect = CGRect(x: fx(0.815), y: elecTop, width: fx(0.170), height: fy(0.250))
+        drawElectricalDock(ctx, elecRect, snap: snap, sup: sup, t: t)
+        // Under it: turbine-generator mechanical + excitation, filling down to the data page.
+        let tgTop = elecRect.maxY + fy(0.012)
+        drawTurbineGen(ctx, CGRect(x: fx(0.815), y: tgTop, width: fx(0.170), height: fy(0.824) - tgTop), snap: snap, sup: sup)
         // Fill the empty bottom-left (primary loop) and the centre void (steam cycle).
         drawPrimaryDock(ctx, CGRect(x: fx(0.150), y: fy(0.815), width: fx(0.175), height: fy(0.165)), snap: snap, sup: sup)
         drawSteamCycle(ctx, CGRect(x: fx(0.442), y: fy(0.430), width: fx(0.150), height: fy(0.150)), snap: snap, sup: sup)
@@ -817,11 +842,12 @@ struct MimicDiagram: View {
                                 gen: CGRect, snap: PlantSnapshot, sup: PlantSupervisor) {
         func fx(_ v: CGFloat) -> CGFloat { v * w }
         func fy(_ v: CGFloat) -> CGFloat { v * h }
-        let trip = sup.turbineTrip
-        let live = trip ? Theme.deEnergized : Theme.elecGold     // gen-side path
-        let bus  = Theme.elecGold                                 // 400 kV grid: always live
-        let stby = Theme.deEnergized.opacity(0.55)               // standby feeder
-        let okC  = Theme.isFlat ? Theme.textHdr : Theme.statusNormal
+        let trip    = sup.turbineTrip
+        let g52Open = trip || sup.genBreakerOpen                  // gen breaker: open on trip or by hand
+        let genCol  = g52Open ? Theme.deEnergized : Theme.elecGold
+        let bus     = Theme.elecGold                              // 400 kV grid bus: always energized
+        let dark    = Theme.deEnergized.opacity(0.6)             // de-energized conductor
+        let okC     = Theme.isFlat ? Theme.textHdr : Theme.statusNormal
 
         let cx   = fx(0.852)
         let xfR  = fx(0.013)
@@ -835,31 +861,35 @@ struct MimicDiagram: View {
 
         // Generator output lead → GSU low-voltage winding. One straight run into
         // the lower circle's edge — no bend, so no chamfer artifact at the joint.
-        pipe(ctx, [(gen.maxX, gen.midY), (cx - xfR, gen.midY)], live, 2)
+        pipe(ctx, [(gen.maxX, gen.midY), (cx - xfR, gen.midY)], genCol, 2)
         // GSU transformer (two-winding).
-        transformer(ctx, CGPoint(x: cx, y: xfY), r: xfR, live: !trip)
+        transformer(ctx, CGPoint(x: cx, y: xfY), r: xfR, live: !g52Open)
         txt(ctx, "GSU 21/400kV", CGPoint(x: cx + xfR + fx(0.005), y: xfY), .leading, Theme.textDim, 7)
         // GSU HV winding → generator breaker 52G → HV bus (single vertical run).
-        pipe(ctx, [(cx, xfY - xfR), (cx, busY)], trip ? stby : bus, 2)
-        breaker(ctx, CGPoint(x: cx, y: gbY), closed: !trip, color: trip ? Theme.deEnergized : bus)
+        pipe(ctx, [(cx, xfY - xfR), (cx, busY)], g52Open ? dark : bus, 2)
+        breaker(ctx, CGPoint(x: cx, y: gbY), closed: !g52Open, color: g52Open ? Theme.deEnergized : bus)
         txt(ctx, "52G", CGPoint(x: cx + fx(0.009), y: gbY), .leading, Theme.textDim, 7)
-        // HV busbar — the 400 kV grid (stays energized on a unit trip).
+        // HV busbar — the 400 kV grid stays energized even on a unit trip.
         ctx.stroke(Path { p in p.move(to: CGPoint(x: busL, y: busY)); p.addLine(to: CGPoint(x: busR, y: busY)) },
                    with: .color(bus), style: StrokeStyle(lineWidth: 3, lineCap: .round))
         txt(ctx, "400 kV 3\u{03C6}", CGPoint(x: busL, y: busY - fy(0.017)), .leading, Theme.textHdr, 8)
-        txt(ctx, trip ? "—.—— Hz" : "50.00 Hz", CGPoint(x: busR, y: busY - fy(0.017)), .trailing, okC, 8)
-        // Two 400 kV circuits, BOTH in service, sharing the export current — the
-        // reason there are two is redundancy, not a spare you toggle. A one-line
-        // draws each 3-phase circuit as a single conductor + the 3φ tick marks.
-        let kAeach = trip ? 0 : snap.electricPowerW / (1.732 * 400e3 * 0.92) / 2000
+        txt(ctx, "50.00 Hz", CGPoint(x: busR, y: busY - fy(0.017)), .trailing, okC, 8)
+        // Two 400 kV circuits — click a breaker to open/close it. One is redundant
+        // (the other then carries full load); open BOTH → full load reject → trip.
+        // The 3φ tick marks show each single conductor carries all three phases.
+        let lineOpen = [sup.line1BreakerOpen, sup.line2BreakerOpen]
+        let closedN  = lineOpen.filter { !$0 }.count
+        let iTot     = g52Open ? 0 : snap.electricPowerW / (1.732 * 400e3 * 0.92) / 1000   // kA exported
         for (i, x) in [fA, fB].enumerated() {
-            let lc = trip ? stby : bus
+            let open = lineOpen[i]
+            let lc   = open ? dark : bus
             pipe(ctx, [(x, busY), (x, topY + 5)], lc, 2)
             phaseTicks(ctx, CGPoint(x: x, y: (busY + brkY) / 2), color: lc)
-            breaker(ctx, CGPoint(x: x, y: brkY), closed: !trip, color: trip ? Theme.deEnergized : bus)
-            txt(ctx, trip ? "OPEN" : String(format: "%.2f kA", kAeach),
+            breaker(ctx, CGPoint(x: x, y: brkY), closed: !open, color: open ? Theme.deEnergized : bus)
+            let kA = open ? 0 : (closedN > 0 ? iTot / Double(closedN) : 0)
+            txt(ctx, open ? "OPEN" : String(format: "%.2f kA", kA),
                 CGPoint(x: x + fx(0.009), y: brkY), .leading,
-                trip ? Theme.caution : Theme.textDim, 7)
+                open ? Theme.caution : Theme.textDim, 7)
             tower(ctx, CGPoint(x: x, y: topY), color: lc)
             txt(ctx, "LINE \(i + 1)", CGPoint(x: x, y: topY - fy(0.017)), .center, Theme.textDim, 7)
         }
@@ -920,6 +950,10 @@ struct MimicDiagram: View {
             ("STAT T",   String(format: "%.0f°C", statT), statT > 110 ? Theme.caution : Theme.ink),
             ("THRUST",   String(format: "%.0f%%", 22 + 46 * load), Theme.ink),
             ("STAT I",   trip ? "0 kA" : String(format: "%.1f kA", statI), Theme.ink),
+            ("FIELD V",  trip ? "0 V"  : String(format: "%.0f V", 250 + 150 * load), Theme.ink),
+            ("SEAL OIL", "4.5 bar", Theme.ink),
+            ("FIELD A",  trip ? "0 A"  : String(format: "%.0f A", 2400 + 1400 * load), Theme.ink),
+            ("GAS T",    String(format: "%.0f°C", 40 + 6 * load), Theme.ink),
         ]
         let cols = 2, rpc = (items.count + cols - 1) / cols
         let gx: CGFloat = 8
