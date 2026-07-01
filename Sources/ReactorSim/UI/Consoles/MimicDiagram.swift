@@ -181,9 +181,10 @@ struct MimicDiagram: View {
         // ════════════════════════════════════════════════════════════════════
         let fuelAlarm = snap.fuelTempK > 1200
         vesselRPV(ctx, vessel, snap: snap, alarm: fuelAlarm ? Theme.alarm : nil)
-        // nozzle stubs
-        nozzle(ctx, CGPoint(x: vessel.maxX, y: hotY),  Theme.hotLeg)
-        nozzle(ctx, CGPoint(x: vessel.maxX, y: coldY), Theme.water)
+        // nozzle stubs — coloured by their leg's temperature (match the pipe, not
+        // a fixed hot-orange that clashes with the temperature-coded piping).
+        nozzle(ctx, CGPoint(x: vessel.maxX, y: hotY),  cHot)
+        nozzle(ctx, CGPoint(x: vessel.maxX, y: coldY), cCold)
 
         // Reactor data block under the vessel (bottom is clear).
         let pcx = vessel.midX
@@ -509,13 +510,11 @@ struct MimicDiagram: View {
         dockField(ctx, r, "CORE · THERMAL DATA")
         let pf   = max(0.001, snap.powerFraction)
         let flow = max(0.05, Double(sup.primaryFlow) * sup.omegaRCP)
-        let pRat = max(0.3, sup.pressureMPa / 15.5)
-        let tFac = max(0.5, 1 - (snap.coolantTempK - 550) / 130)
-        let dnbr = min(9.99, (flow.squareRoot() / pf.squareRoot()) * pRat * tFac * 1.93)
-        let ao   = -snap.rodPosition * 32 + (1 - flow) * 6
-        let lhr  = 13.0 * pf * (1 + abs(ao) / 110)
-        let qptr = 1.00 + abs(ao) / 1800
-        let pct  = snap.coolantTempK + 80 * pf + max(0, snap.fuelTempK - 900) * 0.4
+        let dnbr = snap.minDNBR                         // real: min over axial nodes (W-3-style CHF)
+        let ao   = snap.axialOffsetPct                  // real: from the axial flux shape
+        let lhr  = 6.0 * snap.fq * pf                   // peak linear heat rate ≈ avg × Fq
+        let qptr = 1.00 + abs(ao) / 1800                // radial tilt (not modelled) — near unity
+        let pct  = snap.peakCladTempK                   // real: hottest node clad surface
         let subcool = tsatK(sup.pressureMPa) - snap.hotLegTempK
         let pcm  = snap.reactivity * 1e5
         let sdm  = max(0, 5.2 - snap.rodPosition * 1.5)
@@ -533,7 +532,7 @@ struct MimicDiagram: View {
             ("DNBR",     String(format: "%.2f", dnbr), dnbrC),
             ("PK LHR",   String(format: "%.1f", lhr) + " kW/ft", cA(lhr > 20)),
             ("AXIAL ΔI", String(format: "%+.0f%%", ao), abs(ao) > 15 ? Theme.caution : Theme.ink),
-            ("PK CLAD",  String(format: "%.0f K", pct), cA(pct > 1200)),
+            ("PK CLAD",  String(format: "%.0f K", pct), pct > 850 ? Theme.alarm : pct > 720 ? Theme.caution : Theme.ink),
             ("QPTR",     String(format: "%.3f", qptr), cA(qptr > 1.02)),
             ("SUR",      String(format: "%+.1f dpm", rate * 60), Theme.ink),
             ("PERIOD",   period >= 999 ? "∞ s" : String(format: "%.0f s", period), Theme.ink),

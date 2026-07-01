@@ -33,6 +33,14 @@ struct PlantSnapshot {
     var hotLegTempK:        Double = 565
     var coldLegTempK:       Double = 535
     var steamPressureMPa:   Double = 1.9
+    // Axial-nodal outputs (real, from AxialCore — no longer mimic proxies).
+    var axialOffsetPct:     Double = 0
+    var fz:                 Double = 1.5     // axial peaking
+    var fq:                 Double = 2.1     // total heat-flux hot-channel factor
+    var fdh:                Double = 1.55    // enthalpy-rise hot-channel factor
+    var peakCladTempK:      Double = 620
+    var minDNBR:            Double = 2.0
+    var axialProfile:       [Double] = []    // per-node relative power (for an axial flux display)
 }
 
 /// Back-compatible name — the plant now models every reactor kind via params.
@@ -44,6 +52,7 @@ final class ReactorPlant {
     private let xenon:     XenonIodine
     private let thermal:   ThermalHydraulics
     private var decayHeat: DecayHeat
+    private let axial:     AxialCore
 
     private(set) var time: Double = 0
     private(set) var scrammed: Bool = false
@@ -56,6 +65,7 @@ final class ReactorPlant {
         xenon     = XenonIodine(params)
         thermal   = ThermalHydraulics(params)
         decayHeat = DecayHeat()
+        axial     = AxialCore(params)
     }
 
     private func computeReactivity(_ ctrl: ControlInputs) -> Double {
@@ -103,6 +113,10 @@ final class ReactorPlant {
             let decay = decayHeat.step(dt: dtSub, n: kinetics.n)
             let pTh   = (kinetics.n * fissionShare + decay) * p.nominalPower
             thermal.step(dt: dtSub, thermalPower: pTh, flow: ctrl.primaryFlow, turbineValve: ctrl.turbineValve)
+            // Axial shape + per-node xenon (driven by the just-updated global
+            // state; does not feed back into the 0-D reactivity above).
+            axial.step(dt: dtSub, power: kinetics.n, rodPos: rodPosEffective,
+                       inlet: thermal.tCold, outlet: thermal.tHot, flow: ctrl.primaryFlow)
             time += dtSub
         }
 
@@ -124,7 +138,17 @@ final class ReactorPlant {
             decayHeatFraction: decayHeat.fraction,
             hotLegTempK:       thermal.tHot,
             coldLegTempK:      thermal.tCold,
-            steamPressureMPa:  thermal.steamPressureMPa
+            steamPressureMPa:  thermal.steamPressureMPa,
+            axialOffsetPct:    axial.axialOffsetPct,
+            fz:                axial.fz,
+            fq:                axial.fq,
+            fdh:               axial.fdh,
+            peakCladTempK:     axial.peakCladTempK(inlet: thermal.tCold, outlet: thermal.tHot,
+                                                   power: kinetics.n * fissionShare + decayHeat.fraction),
+            minDNBR:           axial.minDNBR(power: kinetics.n * fissionShare + decayHeat.fraction,
+                                             flow: ctrl.primaryFlow, pressureMPa: p.nominalPressureMPa,
+                                             inlet: thermal.tCold, outlet: thermal.tHot),
+            axialProfile:      axial.phi
         )
     }
 
