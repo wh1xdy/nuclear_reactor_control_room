@@ -167,6 +167,10 @@ private struct MimicControlStrip: View {
 
             ScramButton(supervisor: supervisor).frame(width: 140)
 
+            // ΔI–power flyspeck: the CAOC operating-band chart. Keep the point
+            // in the corridor with rods as xenon walks the axial shape around.
+            FlyspeckChart(supervisor: supervisor).frame(width: 148)
+
             VStack(spacing: 6) {
                 TrendView(values: supervisor.orderedHistory(supervisor.histPower),
                           yLo: 0, yHi: 130, color: Theme.accent, label: "RX PWR %").frame(height: 40)
@@ -231,5 +235,89 @@ private struct MimicControlStrip: View {
         }
         .buttonStyle(.plain)
         .controlSurface(tint: on ? tint : nil)
+    }
+}
+
+// MARK: — ΔI–power flyspeck (CAOC operating band)
+
+/// The classic PWR axial-offset control chart: ΔI on x, power on y, with the
+/// allowed operating corridor around the target axial offset. The live point
+/// must be held inside the band with rods while xenon walks the shape around
+/// (the axial-xenon oscillation makes this a real exercise at speed). The band
+/// is centred on the kind's natural full-power AO (a BWR runs bottom-peaked).
+private struct FlyspeckChart: View {
+    let supervisor: PlantSupervisor
+
+    var body: some View {
+        Canvas { ctx, size in
+            let refAO: Double = supervisor.reactorKind == .bwr ? -20 : -5
+            let plot = CGRect(x: 26, y: 14, width: size.width - 32, height: size.height - 26)
+            func px(_ ao: Double) -> CGFloat {   // ΔI → x (ref ± 20 %)
+                plot.minX + plot.width * CGFloat((ao - (refAO - 20)) / 40)
+            }
+            func py(_ p: Double) -> CGFloat {    // power % → y (0…110)
+                plot.maxY - plot.height * CGFloat(max(0, min(110, p)) / 110)
+            }
+            func halfW(_ p: Double) -> Double {  // corridor half-width vs power
+                p >= 90 ? 6 : min(18, 6 + (90 - p) * 0.25)
+            }
+
+            ctx.fill(Path(plot), with: .color(Theme.dockTint))
+            // Operating band (trapezoid, wider at low power).
+            var band = Path()
+            let ps = stride(from: 20.0, through: 110.0, by: 10.0).map { $0 }
+            band.move(to: CGPoint(x: px(refAO - halfW(ps[0])), y: py(ps[0])))
+            for p in ps { band.addLine(to: CGPoint(x: px(refAO - halfW(p)), y: py(p))) }
+            for p in ps.reversed() { band.addLine(to: CGPoint(x: px(refAO + halfW(p)), y: py(p))) }
+            band.closeSubpath()
+            let bandTint = Theme.isFlat ? Theme.ink.opacity(0.07) : Theme.statusNormal.opacity(0.10)
+            ctx.fill(band, with: .color(bandTint))
+            ctx.stroke(band, with: .color(Theme.ink.opacity(0.20)), lineWidth: 0.75)
+            // Target AO reference line.
+            ctx.stroke(Path { p in p.move(to: CGPoint(x: px(refAO), y: plot.minY)); p.addLine(to: CGPoint(x: px(refAO), y: plot.maxY)) },
+                       with: .color(Theme.ink.opacity(0.18)), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
+
+            // Trail: recent ΔI/power history, fading toward the past.
+            let aos = supervisor.orderedHistory(supervisor.histAO)
+            let pws = supervisor.orderedHistory(supervisor.histPower)
+            let n = min(aos.count, pws.count)
+            if n > 8 {
+                let step = max(1, n / 90)
+                var prev: CGPoint? = nil
+                var i = 0
+                while i < n {
+                    let pt = CGPoint(x: px(aos[i]), y: py(pws[i]))
+                    if let a = prev {
+                        let age = Double(i) / Double(n)          // 0 old → 1 new
+                        ctx.stroke(Path { p in p.move(to: a); p.addLine(to: pt) },
+                                   with: .color(Theme.accent.opacity(0.08 + 0.42 * age)), lineWidth: 1)
+                    }
+                    prev = pt
+                    i += step
+                }
+            }
+
+            // Live point — calm in the band, caution outside it.
+            let ao = supervisor.snapshot.axialOffsetPct
+            let pw = supervisor.snapshot.powerFraction * 100
+            let inBand = abs(ao - refAO) <= halfW(pw)
+            let dotC: Color = inBand ? (Theme.isFlat ? Theme.ink : Theme.statusNormal) : Theme.caution
+            let dot = CGPoint(x: px(ao), y: py(pw))
+            ctx.fill(Path(ellipseIn: CGRect(x: dot.x - 3, y: dot.y - 3, width: 6, height: 6)), with: .color(dotC))
+            ctx.stroke(Path(ellipseIn: CGRect(x: dot.x - 5.5, y: dot.y - 5.5, width: 11, height: 11)),
+                       with: .color(dotC.opacity(0.4)), lineWidth: 1)
+
+            // Frame + labels.
+            ctx.stroke(Path(plot), with: .color(Theme.ink.opacity(0.18)), lineWidth: 1)
+            func lbl(_ s: String, _ at: CGPoint, _ anchor: UnitPoint = .center) {
+                ctx.draw(Text(s).font(.system(size: 7, design: .monospaced)).foregroundColor(Theme.textDim), at: at, anchor: anchor)
+            }
+            lbl("ΔI-PWR", CGPoint(x: plot.minX, y: 5), .topLeading)
+            lbl(String(format: "%+.0f", refAO), CGPoint(x: px(refAO), y: plot.maxY + 6))
+            lbl(String(format: "%+.0f", refAO - 15), CGPoint(x: px(refAO - 15), y: plot.maxY + 6))
+            lbl(String(format: "%+.0f", refAO + 15), CGPoint(x: px(refAO + 15), y: plot.maxY + 6))
+            lbl("100", CGPoint(x: plot.minX - 3, y: py(100)), .trailing)
+            lbl("50", CGPoint(x: plot.minX - 3, y: py(50)), .trailing)
+        }
     }
 }
