@@ -77,9 +77,13 @@ final class PlantSupervisor {
     private(set) var histElec:   [Double]   // electric power MWe
     private(set) var histSteamT: [Double]   // SG temperature K
     private(set) var histCoolT:  [Double]   // coolant temperature K
+    private(set) var histTime:   [Double]   // SIM time [s] — normalises rate reads (SUR) at any speed
 
     // MARK: — Private
     private let plant: PWRPlant
+    /// Turbine-generator electrical (AVR/excitation → MVAr) + mechanical
+    /// supervision states — the mimic reads these instead of static gauges.
+    let turbineGen = TurbineGenerator()
     private var _alarmMap:    [String: ReactorAlarm] = [:]
     private var _firstOutSet: Bool = false
     private var _histIdx:     Int  = 0
@@ -121,6 +125,7 @@ final class PlantSupervisor {
         histElec   = Array(repeating: elecMW,                count: n)
         histSteamT = Array(repeating: 553.0,                 count: n)
         histCoolT  = Array(repeating: 550.0,                 count: n)
+        histTime   = Array(repeating: 0.0,                   count: n)
     }
 
     // MARK: — Step
@@ -148,11 +153,14 @@ final class PlantSupervisor {
             primaryFlow:    effFlow,
             turbineValve:   effectiveValve,
             turbineTripped: turbineTrip,
-            scram:          scrammed
+            scram:          scrammed,
+            primaryPressureMPa: pressureMPa   // live PZR pressure → DNBR anchor
         )
         snapshot = plant.step(dt: dt, ctrl: ctrl)
         scrammed = snapshot.scrammed
 
+        turbineGen.step(dt: dt, grossMWe: snapshot.electricPowerW / 1e6,
+                        tripped: turbineTrip || genBreakerOpen || (line1BreakerOpen && line2BreakerOpen))
         updateBOP(dt: dt)
         updateBoron(dt: dt)
         updateAlarms()
@@ -413,6 +421,7 @@ final class PlantSupervisor {
         histElec[i]   = snapshot.electricPowerW / 1e6
         histSteamT[i] = snapshot.sgTempK
         histCoolT[i]  = snapshot.coolantTempK
+        histTime[i]   = snapshot.time
         _histIdx += 1
     }
 

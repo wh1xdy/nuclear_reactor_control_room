@@ -432,10 +432,12 @@ struct MimicDiagram: View {
         var y = r.minY + 20
         tagRow(ctx, r, y, "GROSS", String(format: "%.0f MWe", gross), gcol); y += 13
         tagRow(ctx, r, y, "NET", String(format: "%.0f MWe", gross - aux), gcol); y += 13
-        tagRow(ctx, r, y, "MVAr*", String(format: "%.0f", gross * 0.43), gcol); y += 13
+        // Real reactive power from the excitation/AVR model (not a pf guess).
+        tagRow(ctx, r, y, "MVAr", String(format: "%.0f", sup.turbineGen.mvar), gcol); y += 13
         let hzCol = synced ? (Theme.isFlat ? Theme.ink : Theme.statusNormal) : Theme.deEnergized
         tagRow(ctx, r, y, "GRID Hz", synced ? "50.00" : "--.--", hzCol); y += 11
-        ctx.draw(Text("*0.92 pf").font(.system(size: 6, design: .monospaced)).foregroundColor(Theme.textDim),
+        ctx.draw(Text(String(format: "%.2f pf · δ %.0f°", sup.turbineGen.powerFactor, sup.turbineGen.loadAngleDeg))
+                    .font(.system(size: 6, design: .monospaced)).foregroundColor(Theme.textDim),
                  at: CGPoint(x: r.minX + 8, y: y), anchor: .leading)
         // Synchroscope sized/placed within the band BELOW the values, so it never
         // climbs into the value rows even as the window shrinks.
@@ -509,11 +511,12 @@ struct MimicDiagram: View {
     private func drawCoreLimits(_ ctx: GraphicsContext, _ r: CGRect, snap: PlantSnapshot, sup: PlantSupervisor) {
         dockField(ctx, r, "CORE · THERMAL DATA")
         let pf   = max(0.001, snap.powerFraction)
-        let flow = max(0.05, Double(sup.primaryFlow) * sup.omegaRCP)
+        // Matches the RCP tag / RCS PRIMARY dock convention: zero after a scram
+        // (no more 18,800 kg/s here beside 0 kg/s there on the same screen).
+        let flow = snap.scrammed ? 0 : max(0, Double(sup.primaryFlow) * sup.omegaRCP)
         let dnbr = snap.minDNBR                         // real: min over axial nodes (W-3-style CHF)
         let ao   = snap.axialOffsetPct                  // real: from the axial flux shape
         let lhr  = 6.0 * snap.fq * pf                   // peak linear heat rate ≈ avg × Fq
-        let qptr = 1.00 + abs(ao) / 1800                // radial tilt (not modelled) — near unity
         let pct  = snap.peakCladTempK                   // real: hottest node clad surface
         let subcool = tsatK(sup.pressureMPa) - snap.hotLegTempK
         let pcm  = snap.reactivity * 1e5
@@ -521,10 +524,16 @@ struct MimicDiagram: View {
         let sgL  = max(8, min(92, sup.feedwaterInv * 62))
         let mwe  = snap.electricPowerW / 1e6
         let eta  = snap.thermalPowerW > 1 ? mwe / (snap.thermalPowerW / 1e6) * 100 : 0
+        // SUR / period normalised by SIM time (histTime), so the reads are
+        // correct at any time compression — not 600× too fast at ×600.
         let hp = sup.orderedHistory(sup.histPower)
+        let ht = sup.orderedHistory(sup.histTime)
         let p1 = hp.last ?? 100, p0 = hp.count > 50 ? hp[hp.count - 50] : p1
-        let rate = (p1 > 0.1 && p0 > 0.1) ? (p1 - p0) / max(0.1, p0) : 0
-        let period = abs(rate) < 0.0015 ? 999.0 : min(999, 0.8 / abs(rate))
+        let t1 = ht.last ?? 0,   t0 = ht.count > 50 ? ht[ht.count - 50] : t1
+        let dtW = max(0.001, t1 - t0)                            // sim-s in the window
+        let lnR = (p1 > 0.1 && p0 > 0.1) ? log(p1 / p0) : 0
+        let sur = lnR / dtW * 60 / log(10.0)                     // decades per minute
+        let period = abs(lnR) < 1e-4 ? 999.0 : min(999, max(-999, dtW / lnR))
         let cA = { (c: Bool) in c ? Theme.alarm : Theme.ink }
         let dnbrC = dnbr < 1.30 ? Theme.alarm : dnbr < 1.55 ? Theme.caution : Theme.statusNormal
 
@@ -533,9 +542,9 @@ struct MimicDiagram: View {
             ("PK LHR",   String(format: "%.1f", lhr) + " kW/ft", cA(lhr > 20)),
             ("AXIAL ΔI", String(format: "%+.0f%%", ao), abs(ao) > 15 ? Theme.caution : Theme.ink),
             ("PK CLAD",  String(format: "%.0f K", pct), pct > 850 ? Theme.alarm : pct > 720 ? Theme.caution : Theme.ink),
-            ("QPTR",     String(format: "%.3f", qptr), cA(qptr > 1.02)),
-            ("SUR",      String(format: "%+.1f dpm", rate * 60), Theme.ink),
-            ("PERIOD",   period >= 999 ? "∞ s" : String(format: "%.0f s", period), Theme.ink),
+            ("Fz",       String(format: "%.2f", snap.fz), snap.fz > 1.55 ? Theme.caution : Theme.ink),
+            ("SUR",      String(format: "%+.2f dpm", sur), abs(sur) > 1 ? Theme.caution : Theme.ink),
+            ("PERIOD",   abs(period) >= 999 ? "∞ s" : String(format: "%+.0f s", period), Theme.ink),
             ("ρ NET",    fmtPcm(pcm), abs(pcm) > 100 ? Theme.caution : Theme.ink),
             ("SDM",      String(format: "%.1f%%Δk", sdm), sdm < 1.3 ? Theme.alarm : Theme.ink),
             ("BORON",    String(format: "%.0f ppm", sup.boronPPM), Theme.ink),
@@ -668,14 +677,32 @@ struct MimicDiagram: View {
         // Core region with glow + assembly lattice.
         let core = CGRect(x: body.minX + body.width * 0.16, y: body.minY + body.height * 0.42,
                           width: body.width * 0.68, height: body.height * 0.36)
-        // Core incandescence by power: radial flux peak, subcritical-dark → amber
-        // at full power → white-hot, with an overpower red rim before the trip.
-        let g = max(0, min(1, snap.powerFraction / 1.10))
-        let glow = Theme.fluxGlow(g)
-        ctx.fill(Path(core), with: .radialGradient(
-            Gradient(colors: [glow.center, glow.edge]),
-            center: CGPoint(x: core.midX, y: core.midY),
-            startRadius: 0, endRadius: core.width * 0.7))
+        // Core incandescence: brightness follows the LIVE axial flux profile
+        // (per-node bands, node 0 at the bottom — the AxialCore orientation),
+        // so rod insertion visibly darkens the top and an axial xenon swing
+        // breathes up and down the core. Falls back to the bulk radial glow if
+        // no profile is available. AUTHENTIC skins stay flat (fluxGlow gates).
+        if snap.axialProfile.isEmpty {
+            let g = max(0, min(1, snap.powerFraction / 1.10))
+            let glow = Theme.fluxGlow(g)
+            ctx.fill(Path(core), with: .radialGradient(
+                Gradient(colors: [glow.center, glow.edge]),
+                center: CGPoint(x: core.midX, y: core.midY),
+                startRadius: 0, endRadius: core.width * 0.7))
+        } else {
+            let n = snap.axialProfile.count
+            let bandH = core.height / CGFloat(n)
+            for i in 0..<n {
+                let gi = max(0, min(1, snap.powerFraction * snap.axialProfile[i] / 1.10))
+                let gl = Theme.fluxGlow(gi)
+                let y = core.maxY - CGFloat(i + 1) * bandH
+                let band = CGRect(x: core.minX, y: y, width: core.width, height: bandH + 0.5)
+                ctx.fill(Path(band), with: .linearGradient(
+                    Gradient(colors: [gl.edge, gl.center, gl.edge]),
+                    startPoint: CGPoint(x: core.minX, y: y),
+                    endPoint: CGPoint(x: core.maxX, y: y)))
+            }
+        }
         if snap.powerFraction > 1.10 {
             ctx.stroke(Path(core), with: .color(Theme.alarm.opacity(min(1, (snap.powerFraction - 1.10) / 0.10))), lineWidth: 2)
         } else {
@@ -925,30 +952,30 @@ struct MimicDiagram: View {
     }
 
     /// Right dock under the electrical picture: turbine-generator mechanical +
-    /// excitation supervision. The physics model doesn't simulate bearings / H₂
-    /// cooling, so these are representative instrument values that track load and
-    /// trip state — labeled honestly, same spirit as the other supervisory reads.
+    /// excitation supervision, read from the TurbineGenerator model — thermal
+    /// states lag load with real time constants, speed coasts down on a trip
+    /// (with the vibration bump through the rotor criticals), and the field /
+    /// stator values come from the AVR excitation loop.
     private func drawTurbineGen(_ ctx: GraphicsContext, _ r: CGRect, snap: PlantSnapshot, sup: PlantSupervisor) {
         dockField(ctx, r, "TURBINE-GENERATOR")
+        let tg   = sup.turbineGen
         let trip = sup.turbineTrip
         let mwe  = snap.electricPowerW / 1e6
         let load = max(0, min(1, mwe / 990))
-        let brgT = 60 + 32 * load
-        let statT = 55 + 42 * load
-        let statI = trip ? 0 : mwe / (1.732 * 21.0 * 0.92)     // kA at the 21 kV terminals
+        let rpmC: Color = trip ? (tg.rpm > 1 ? Theme.caution : Theme.alarm) : Theme.ink
         let items: [(String, String, Color)] = [
-            ("SPEED",    trip ? "0 rpm" : "3000 rpm", trip ? Theme.alarm : Theme.ink),
-            ("BRG MTL",  String(format: "%.0f°C", brgT), brgT > 105 ? Theme.caution : Theme.ink),
+            ("SPEED",    String(format: "%.0f rpm", tg.rpm), rpmC),
+            ("BRG MTL",  String(format: "%.0f°C", tg.brgMetalC), tg.brgMetalC > 105 ? Theme.caution : Theme.ink),
             ("O/SPD",    "3300 rpm", Theme.textDim),
-            ("LUBE",     "2.1 bar", Theme.ink),
-            ("VIB",      String(format: "%.1f mil", 1.1 + 0.7 * load), Theme.ink),
-            ("H2 P",     "4.0 bar", Theme.ink),
+            ("LUBE",     String(format: "%.0f°C", tg.lubeC), Theme.ink),
+            ("VIB",      String(format: "%.1f mil", tg.vibMil), tg.vibMil > 2.8 ? Theme.caution : Theme.ink),
+            ("H2 GAS",   String(format: "%.0f°C", tg.h2GasC), Theme.ink),
             ("ECC",      String(format: "%.2f mil", 0.30 + 0.12 * load), Theme.ink),
             ("H2 PUR",   "98.5%", Theme.ink),
-            ("DIFF EXP", String(format: "%+.1f mm", -0.4 + 1.6 * load), Theme.ink),
-            ("STAT T",   String(format: "%.0f°C", statT), statT > 110 ? Theme.caution : Theme.ink),
+            ("FIELD",    String(format: "%.0fV %.1fkA", tg.fieldV, tg.fieldA / 1000), Theme.ink),
+            ("STAT T",   String(format: "%.0f°C", tg.statorC), tg.statorC > 110 ? Theme.caution : Theme.ink),
             ("THRUST",   String(format: "%.0f%%", 22 + 46 * load), Theme.ink),
-            ("STAT I",   trip ? "0 kA" : String(format: "%.1f kA", statI), Theme.ink),
+            ("STAT I",   String(format: "%.1f kA", tg.statorKA), Theme.ink),
         ]
         let cols = 2, rpc = (items.count + cols - 1) / cols
         let gx: CGFloat = 8

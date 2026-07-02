@@ -119,4 +119,11 @@ final class ThermalHydraulics {
         let logPbar = A - B / (max(tK, 50) + C)   // P in bar
         return pow(10, logPbar) / 10.0            // bar → MPa
     }
+
+    /// Exact inverse of satPressureMPa: saturation temperature [K] at P [MPa].
+    /// (15.5 MPa → ~616 K, 7 MPa → ~559 K, 6.4 MPa → ~553 K.)
+    static func satTempK(_ pMPa: Double) -> Double {
+        let A = 5.444, B = 1951.8, C = -16.5
+        return B / (A - log10(max(pMPa, 0.001) * 10)) - C
+    }
 }
