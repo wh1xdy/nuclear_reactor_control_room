@@ -35,6 +35,27 @@ final class AxialCore {
     private var iod: [Double]         // per-node I-135
     private var xen: [Double]         // per-node Xe-135
 
+    // ── Radial model: 3 equal-area rings (centre / mid / periphery) with
+    //    ring-wise xenon — the same reactivity-tilt scheme as the axial solver,
+    //    on 3 radial nodes. Gives the real radial peaking for the core map and
+    //    slow xenon-driven radial redistribution. Mean(ring) = 1.
+    private(set) var ring: [Double] = [1.14, 1.05, 0.81]
+    private var ringIod: [Double] = [0, 0, 0]
+    private var ringXen: [Double] = [0, 0, 0]
+    // Fixed leakage tilt that maintains the centre-peaked fundamental against
+    // the flattening feedbacks (Δk/k units, mean-removed): periphery leaks.
+    // Calibrated for a loaded-core-like profile ≈ 1.30 / 1.05 / 0.65.
+    private let ringLeak: [Double] = [+0.006, +0.002, -0.008]
+
+    // ── Azimuthal first-harmonic tilt (the QPTR driver). Quadrant xenon
+    //    imbalance (xTiltXe) drives a quasi-static flux tilt against it —
+    //    stable/damped, so QPTR sits at 1.000 until something asymmetric
+    //    (e.g. a future stuck-rod malfunction) excites it via kickTilt().
+    private(set) var tiltX: Double = 0
+    private(set) var tiltY: Double = 0
+    private var tiltXeX: Double = 0
+    private var tiltXeY: Double = 0
+
     // Preallocated per-substep scratch — no heap churn on the 60 Hz hot path.
     private var tm:   [Double]        // moderator temperature profile
     private var tf:   [Double]        // fuel temperature profile
@@ -54,7 +75,11 @@ final class AxialCore {
     // the axial-xenon stability (1.6 → damped ~32 h oscillation; raise toward
     // ~2.5 for the marginal/divergent EOL-core behaviour).
     private let shapeGain: Double = 8.0   // Δk/k local reactivity → flux tilt
-    private let xeMult:    Double = 1.6   // axial-xenon feedback amplification (>1 = less stable)
+    private let xeMultBase: Double = 1.6  // BOL axial-xenon feedback (damped ~32 h oscillation)
+    /// End-of-cycle mode multiplier: 1.0 = BOL (damped); ~1.55 pushes the
+    /// axial-xenon oscillation toward the marginal/divergent EOL behaviour.
+    var eolFactor: Double = 1.0
+    private var xeMult: Double { xeMultBase * eolFactor }
 
     // ── DNBR / clad / peaking calibration ──────────────────────────────────
     private let chfRef:    Double = 2.66  // → nominal min-DNBR ≈ 2.0
@@ -165,7 +190,61 @@ final class AxialCore {
             if iod[i] < 0 { iod[i] = 0 }
             if xen[i] < 0 { xen[i] = 0 }
         }
+
+        stepRadial(dt: dt, nPos: nPos)
     }
+
+    /// Radial rings + azimuthal tilt. Same reactivity-tilt power iteration as
+    /// the axial shape, on 3 radial nodes; ring-wise xenon flattens the profile
+    /// at power (high-flux centre burns more xenon locally… and the leak term
+    /// holds the fundamental). The azimuthal pair is a damped xenon oscillator
+    /// per axis — quiescent (QPTR 1.000) until kickTilt() excites it.
+    private func stepRadial(dt: Double, nPos: Double) {
+        let p = params
+        var xb = 0.0
+        for r in 0..<3 { xb += ringXen[r] }
+        xb /= 3
+        var rTilt = [Double](repeating: 0, count: 3)
+        for r in 0..<3 {
+            rTilt[r] = shapeGain * (ringLeak[r]
+                       - xeMult * p.xenonReactivityCoeff * (ringXen[r] - xb))
+        }
+        let tb = (rTilt[0] + rTilt[1] + rTilt[2]) / 3
+        for r in 0..<3 { rTilt[r] -= tb }
+        for _ in 0..<sweeps {
+            var nr = ring
+            for r in 0..<3 {
+                let left  = r > 0 ? ring[r - 1] : ring[r]     // reflective centre
+                let right = r < 2 ? ring[r + 1] : 0.0          // leakage boundary
+                let lap = left - 2 * ring[r] + right
+                nr[r] = max(1e-3, ring[r] + relax * (0.6 * lap + rTilt[r] * ring[r]))
+            }
+            let m = (nr[0] + nr[1] + nr[2]) / 3
+            for r in 0..<3 { ring[r] = nr[r] / m }
+        }
+        for r in 0..<3 {
+            let flux = ring[r] * nPos
+            ringIod[r] += (p.gammaXe * flux - p.lambdaI * ringIod[r]) * dt
+            ringXen[r] += (p.lambdaI * ringIod[r] - (p.lambdaXe + p.xenonBurnCoeff * flux) * ringXen[r]) * dt
+            if ringIod[r] < 0 { ringIod[r] = 0 }
+            if ringXen[r] < 0 { ringXen[r] = 0 }
+        }
+
+        // Azimuthal xenon pair (per axis): flux tilt slaved against the
+        // quadrant xenon imbalance; the imbalance burns back toward zero.
+        let kSlave = 0.9, lamEff = p.lambdaXe + p.xenonBurnCoeff * nPos
+        tiltX = -kSlave * tiltXeX
+        tiltY = -kSlave * tiltXeY
+        tiltXeX += (0.02 * tiltX * nPos - lamEff * tiltXeX) * dt
+        tiltXeY += (0.02 * tiltY * nPos - lamEff * tiltXeY) * dt
+    }
+
+    /// Excite the azimuthal tilt (future stuck-rod / dropped-rod malfunctions).
+    func kickTilt(x: Double, y: Double) { tiltXeX += x; tiltXeY += y }
+
+    /// Quadrant power tilt ratio: max quadrant / average — real, from the
+    /// azimuthal first harmonic (1.000 in symmetric operation).
+    var qptr: Double { 1.0 + 0.64 * (tiltX * tiltX + tiltY * tiltY).squareRoot() }
 
     // ── Diagnostics ─────────────────────────────────────────────────────────
 
@@ -183,10 +262,15 @@ final class AxialCore {
 
     /// Axial peaking Fz = peak local / average.
     var fz: Double { phi.max() ?? 1 }
-    /// Total heat-flux hot-channel factor (axial × nominal radial).
-    var fq: Double { fz * radialNom }
+    /// Live radial peak: hottest ring × azimuthal tilt × the ±3% batch
+    /// checkerboard the core map draws — Fq/FΔH stay consistent with the map.
+    var radialPeak: Double {
+        (ring.max() ?? radialNom) * (1.0 + (tiltX * tiltX + tiltY * tiltY).squareRoot()) * 1.03
+    }
+    /// Total heat-flux hot-channel factor (axial × live radial peak).
+    var fq: Double { fz * radialPeak }
     /// Enthalpy-rise hot-channel factor (heuristic mapping from Fz).
-    var fdh: Double { (1.0 + (fz - 1.0) * 0.62) * radialNom }
+    var fdh: Double { (1.0 + (fz - 1.0) * 0.62) * radialPeak }
 
     /// Peak clad surface temperature [K] — hottest of (local coolant + film ΔT).
     /// The film ΔT rises as flow drops (Dittus–Boelter, h ∝ flow^0.8), so a

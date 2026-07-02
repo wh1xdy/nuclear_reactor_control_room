@@ -77,7 +77,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(console: console, skin: skinBinding, reactor: reactor,
-                         onClose: { showSettings = false })
+                         supervisor: supervisor, onClose: { showSettings = false })
         }
         .overlay {
             if supervisor.simPaused {
@@ -131,9 +131,12 @@ struct ContentView: View {
     private func startKeyMonitor() {
         if keyMonitor != nil { return }          // already registered
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
-            // Esc → pause menu (space is SCRAM). Skip while the settings sheet is up.
+            // Esc: close the core map first if open; otherwise toggle the pause
+            // menu (space is SCRAM). Skip while the settings sheet is up.
             if event.keyCode == 53 && !showSettings {
-                supervisor.simPaused.toggle(); return nil
+                if supervisor.coreMapOpen { supervisor.coreMapOpen = false }
+                else { supervisor.simPaused.toggle() }
+                return nil
             }
             handleKey(event)
             return event
