@@ -98,6 +98,15 @@ final class PlantSupervisor {
 
     /// The reactor kind in service. UI reads it to label kind-specific values.
     var reactorKind: ReactorKind { plant.params.kind }
+    // Kind profile flags — the mimic gates pressurizer/SG/boron/pump drawing on
+    // these instead of hard-coding the PWR plant picture.
+    var hasPressurizer:  Bool { plant.params.hasPressurizer }
+    var hasSteamGenerator: Bool { plant.params.hasSteamGenerator }
+    var hasBoron:        Bool { plant.params.hasBoron }
+    var isNaturalCirc:   Bool { plant.params.naturalCirculation }
+    var nominalPressureMPa: Double { plant.params.nominalPressureMPa }
+    var nominalMWe:      Double { plant.params.nominalPower * plant.params.turbineEfficiency / 1e6 }
+    var nominalMWt:      Double { plant.params.nominalPower / 1e6 }
 
     init(kind: ReactorKind = .pwr) {
         let p: PlantParams
@@ -160,7 +169,8 @@ final class PlantSupervisor {
         scrammed = snapshot.scrammed
 
         turbineGen.step(dt: dt, grossMWe: snapshot.electricPowerW / 1e6,
-                        tripped: turbineTrip || genBreakerOpen || (line1BreakerOpen && line2BreakerOpen))
+                        tripped: turbineTrip || genBreakerOpen || (line1BreakerOpen && line2BreakerOpen),
+                        ratedMWe: nominalMWe)
         updateBOP(dt: dt)
         updateBoron(dt: dt)
         updateAlarms()

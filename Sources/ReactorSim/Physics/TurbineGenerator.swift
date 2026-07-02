@@ -25,7 +25,9 @@ import Foundation
 
 final class TurbineGenerator {
     // ── Machine constants (per-unit on the machine base) ────────────────────
-    private let sBaseMVA  = 1100.0   // machine rating [MVA]
+    // The MVA base scales with the plant rating (990 MWe PWR → 1100 MVA;
+    // a 66 MWe SMR gets a proportionally small machine, not an idling giant).
+    private var sBaseMVA  = 1100.0   // machine rating [MVA]
     private let vBus      = 1.0      // infinite-bus / terminal voltage [pu]
     private let xs        = 1.8      // synchronous reactance [pu]
     private let pfSet     = 0.92     // AVR reactive program: Q = P·tan(acos(pf))
@@ -50,7 +52,9 @@ final class TurbineGenerator {
     var fieldA: Double { emf * fieldAperE }
     var fieldV: Double { fieldA * fieldOhms }
 
-    func step(dt: Double, grossMWe: Double, tripped: Bool) {
+    func step(dt: Double, grossMWe: Double, tripped: Bool, ratedMWe: Double = 990) {
+        sBaseMVA = max(1, ratedMWe) / pfSet   // rating at the design power factor
+        let rated = max(1, ratedMWe)
         // ── Shaft speed: governed at 3000 while on the grid; exponential
         //    coastdown (τ ≈ 8 min) once tripped.
         if tripped {
@@ -86,7 +90,7 @@ final class TurbineGenerator {
         }
 
         // ── Thermal lags (first-order toward load-dependent targets) ────────
-        let load = tripped ? 0 : min(1.2, max(0, grossMWe / 990))
+        let load = tripped ? 0 : min(1.2, max(0, grossMWe / rated))
         brgMetalC += ((60 + 32 * load) - brgMetalC) / 300 * dt
         statorC   += ((55 + 42 * load) - statorC)  / 600 * dt
         lubeC     += ((44 +  8 * load) - lubeC)    / 400 * dt
