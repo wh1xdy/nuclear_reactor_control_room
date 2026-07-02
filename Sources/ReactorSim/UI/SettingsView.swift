@@ -7,7 +7,9 @@ struct SettingsView: View {
     @Binding var console: Console
     @Binding var skin: Skin
     @Binding var reactor: ReactorType
+    var supervisor: PlantSupervisor? = nil   // scenario toggles + data export
     let onClose: () -> Void
+    @State private var exportMsg: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -58,6 +60,22 @@ struct SettingsView: View {
                                       blurb: r.modelBlurb,
                                       selected: reactor == r, enabled: true) { reactor = r }
                         }
+                    }
+
+                    // ── Scenario & data (needs the live supervisor) ──
+                    if let sup = supervisor {
+                        section("SCENARIO & DATA", "Core-cycle scenario and run-data export.")
+                        choiceRow(symbol: "waveform.path.ecg", title: "End-of-cycle core",
+                                  blurb: "Strengthens the axial-xenon feedback toward the divergent EOL oscillation — hold ΔI in the flyspeck band with rods, at speed, or it runs away.",
+                                  selected: sup.eolCore, enabled: true) { sup.eolCore.toggle() }
+                        choiceRow(symbol: "square.and.arrow.down", title: "Export run history (CSV)",
+                                  blurb: exportMsg ?? "Writes the slow historian (5 s cadence, up to ~6 sim-hours: power, temps, pressures, ΔI, DNBR, xenon, boron) to ~/Downloads.",
+                                  selected: false, enabled: true) {
+                            exportMsg = sup.exportCSV().map { "Saved: \($0)" } ?? "EXPORT FAILED"
+                        }
+                        choiceRow(symbol: "speaker.wave.2", title: "Control-room audio",
+                                  blurb: "Procedural turbine hum (tracks shaft speed through a coastdown), annunciator chime on new alarms, breaker clunk.",
+                                  selected: sup.soundEnabled, enabled: true) { sup.soundEnabled.toggle() }
                     }
                 }
                 .padding(16)

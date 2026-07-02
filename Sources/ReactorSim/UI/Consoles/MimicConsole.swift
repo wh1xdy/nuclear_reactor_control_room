@@ -8,12 +8,17 @@ struct MimicConsole: View {
     let supervisor: PlantSupervisor
 
     var body: some View {
-        VStack(spacing: 0) {
-            MimicAlarmBanner(supervisor: supervisor)
-            MimicKeyParams(supervisor: supervisor)
-            MimicDiagram(supervisor: supervisor)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            MimicControlStrip(supervisor: supervisor)
+        ZStack {
+            VStack(spacing: 0) {
+                MimicAlarmBanner(supervisor: supervisor)
+                MimicKeyParams(supervisor: supervisor)
+                MimicDiagram(supervisor: supervisor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                MimicControlStrip(supervisor: supervisor)
+            }
+            if supervisor.coreMapOpen {
+                CoreMapView(supervisor: supervisor)
+            }
         }
     }
 }

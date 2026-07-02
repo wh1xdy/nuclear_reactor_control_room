@@ -43,6 +43,14 @@ final class PlantSupervisor {
     // Sim-clock pause (Esc). Lives here (a reference type) so the 60 Hz timer,
     // which captures the ContentView struct, reads it live rather than stale.
     var simPaused:        Bool  = false
+    // Core-map popup (opened by tapping the core on the mimic; Esc closes).
+    var coreMapOpen:      Bool  = false
+    /// End-of-cycle core: axial-xenon feedback pushed toward divergence.
+    var eolCore: Bool = false { didSet { plant.setEndOfCycle(eolCore) } }
+    /// Control-room audio (procedural: turbine hum, annunciator chime, breaker clunk).
+    let sound = SoundEngine()
+    var soundEnabled: Bool = true { didSet { sound.enabled = soundEnabled } }
+    private var _lastAlarmCount = 0
 
     // MARK: — Automation (all default OFF — manual operation is the trainer's
     // baseline; auto control is the realistic option, not the default)
@@ -142,6 +150,7 @@ final class PlantSupervisor {
         histCoolT  = Array(repeating: 550.0,                 count: n)
         histTime   = Array(repeating: 0.0,                   count: n)
         histAO     = Array(repeating: 0.0,                   count: n)
+        sound.start()
     }
 
     // MARK: — Step
@@ -182,6 +191,11 @@ final class PlantSupervisor {
         updateBoron(dt: dt)
         updateAlarms()
         appendHistory()
+
+        // Audio: hum tracks shaft speed; chime once per newly-raised alarm.
+        sound.update(rpmFraction: turbineGen.rpm / 3000.0)
+        if alarms.count > _lastAlarmCount { sound.chime() }
+        _lastAlarmCount = alarms.count
     }
 
     // MARK: — Operator actions
@@ -213,12 +227,14 @@ final class PlantSupervisor {
     /// the turbine trips (no electrical load → overspeed protection).
     func toggleGenBreaker() {
         genBreakerOpen.toggle()
+        sound.clunk()
         if genBreakerOpen && !turbineTrip { turbineTrip = true }
     }
     /// One outgoing circuit is redundant (the other carries full load). Opening
     /// BOTH with the generator breaker closed is a full load rejection → trip.
     func toggleLineBreaker(_ i: Int) {
         if i == 0 { line1BreakerOpen.toggle() } else { line2BreakerOpen.toggle() }
+        sound.clunk()
         if line1BreakerOpen && line2BreakerOpen && !genBreakerOpen && !turbineTrip {
             turbineTrip = true
         }
