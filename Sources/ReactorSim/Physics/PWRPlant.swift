@@ -12,6 +12,10 @@ struct ControlInputs {
     var turbineValve: Double = 1.0   // effective SG heat-removal valve (turbine or steam dump)
     var turbineTripped: Bool = false // generator off the grid → 0 MWe even if dump flows
     var scram: Bool          = false
+    /// Live primary pressure from the supervisor's pressurizer model [MPa].
+    /// Feeds the DNBR saturation anchor so depressurisation erodes the margin;
+    /// nil (tests, standalone plant) falls back to the nominal pressure.
+    var primaryPressureMPa: Double? = nil
 }
 
 struct PlantSnapshot {
@@ -144,9 +148,11 @@ final class ReactorPlant {
             fq:                axial.fq,
             fdh:               axial.fdh,
             peakCladTempK:     axial.peakCladTempK(inlet: thermal.tCold, outlet: thermal.tHot,
-                                                   power: kinetics.n * fissionShare + decayHeat.fraction),
+                                                   power: kinetics.n * fissionShare + decayHeat.fraction,
+                                                   flow: ctrl.primaryFlow),
             minDNBR:           axial.minDNBR(power: kinetics.n * fissionShare + decayHeat.fraction,
-                                             flow: ctrl.primaryFlow, pressureMPa: p.nominalPressureMPa,
+                                             flow: ctrl.primaryFlow,
+                                             pressureMPa: ctrl.primaryPressureMPa ?? p.nominalPressureMPa,
                                              inlet: thermal.tCold, outlet: thermal.tHot),
             axialProfile:      axial.phi
         )
