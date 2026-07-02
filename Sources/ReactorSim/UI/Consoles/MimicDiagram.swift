@@ -39,9 +39,19 @@ struct MimicDiagram: View {
         let g52 = CGPoint(x: 0.852 * w, y: 0.148 * h)   // 52G generator breaker
         let l1  = CGPoint(x: 0.873 * w, y: 0.085 * h)   // LINE 1 breaker
         let l2  = CGPoint(x: 0.938 * w, y: 0.085 * h)   // LINE 2 breaker
-        if      hypot(p.x - g52.x, p.y - g52.y) < hitR { supervisor.toggleGenBreaker() }
-        else if hypot(p.x - l1.x,  p.y - l1.y)  < hitR { supervisor.toggleLineBreaker(0) }
-        else if hypot(p.x - l2.x,  p.y - l2.y)  < hitR { supervisor.toggleLineBreaker(1) }
+        if      hypot(p.x - g52.x, p.y - g52.y) < hitR { supervisor.toggleGenBreaker(); return }
+        else if hypot(p.x - l1.x,  p.y - l1.y)  < hitR { supervisor.toggleLineBreaker(0); return }
+        else if hypot(p.x - l2.x,  p.y - l2.y)  < hitR { supervisor.toggleLineBreaker(1); return }
+
+        // Tapping the reactor vessel opens the core map popup. Regions track
+        // the per-kind vessel frames in draw().
+        let vesselHit: CGRect
+        switch supervisor.reactorKind {
+        case .pwr: vesselHit = CGRect(x: 0.050 * w, y: 0.29 * h, width: 0.075 * w, height: 0.53 * h)
+        case .bwr: vesselHit = CGRect(x: 0.160 * w, y: 0.20 * h, width: 0.105 * w, height: 0.62 * h)
+        case .smr: vesselHit = CGRect(x: 0.160 * w, y: 0.21 * h, width: 0.100 * w, height: 0.60 * h)
+        }
+        if vesselHit.contains(p) { supervisor.coreMapOpen = true }
     }
 
     private func draw(_ ctx: GraphicsContext, _ size: CGSize,

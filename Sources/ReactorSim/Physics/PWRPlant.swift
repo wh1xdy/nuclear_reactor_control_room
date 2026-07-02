@@ -47,6 +47,11 @@ struct PlantSnapshot {
     var peakCladTempK:      Double = 620
     var minDNBR:            Double = 2.0
     var axialProfile:       [Double] = []    // per-node relative power (for an axial flux display)
+    // Radial model outputs (real, from AxialCore's ring + azimuthal states).
+    var radialRings:        [Double] = []    // centre / mid / periphery relative power
+    var tiltX:              Double = 0       // azimuthal first-harmonic components
+    var tiltY:              Double = 0
+    var qptr:               Double = 1.0     // quadrant power tilt ratio (real)
 }
 
 /// Back-compatible name — the plant now models every reactor kind via params.
@@ -157,7 +162,11 @@ final class ReactorPlant {
                                              flow: ctrl.primaryFlow,
                                              pressureMPa: ctrl.primaryPressureMPa ?? p.nominalPressureMPa,
                                              inlet: thermal.tCold, outlet: thermal.tHot),
-            axialProfile:      axial.phi
+            axialProfile:      axial.phi,
+            radialRings:       axial.ring,
+            tiltX:             axial.tiltX,
+            tiltY:             axial.tiltY,
+            qptr:              axial.qptr
         )
     }
 
@@ -165,4 +174,8 @@ final class ReactorPlant {
         scrammed = false
         // Leave rodPosEffective where it is (rods stay fully inserted until operator withdraws)
     }
+
+    /// End-of-cycle core mode: strengthens the axial-xenon feedback toward the
+    /// marginal/divergent EOL oscillation (the hard flyspeck drill).
+    func setEndOfCycle(_ on: Bool) { axial.eolFactor = on ? 1.55 : 1.0 }
 }
