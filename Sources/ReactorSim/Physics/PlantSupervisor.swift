@@ -78,6 +78,12 @@ final class PlantSupervisor {
     private(set) var histSteamT: [Double]   // SG temperature K
     private(set) var histCoolT:  [Double]   // coolant temperature K
     private(set) var histTime:   [Double]   // SIM time [s] — normalises rate reads (SUR) at any speed
+    private(set) var histAO:     [Double]   // axial offset ΔI [%] — flyspeck trail
+
+    // Slow historian for post-run analysis / CSV export: one sample every 5 sim-s,
+    // 4320 points ≈ 6 sim-hours. Columns are fixed (see exportCSV).
+    private(set) var slowHist: [[Double]] = []
+    private var _slowLastT: Double = -1e9
 
     // MARK: — Private
     private let plant: PWRPlant
@@ -135,6 +141,7 @@ final class PlantSupervisor {
         histSteamT = Array(repeating: 553.0,                 count: n)
         histCoolT  = Array(repeating: 550.0,                 count: n)
         histTime   = Array(repeating: 0.0,                   count: n)
+        histAO     = Array(repeating: 0.0,                   count: n)
     }
 
     // MARK: — Step
@@ -432,7 +439,43 @@ final class PlantSupervisor {
         histSteamT[i] = snapshot.sgTempK
         histCoolT[i]  = snapshot.coolantTempK
         histTime[i]   = snapshot.time
+        histAO[i]     = snapshot.axialOffsetPct
         _histIdx += 1
+
+        // Slow historian: one row per 5 sim-seconds, ~6 sim-hours retained.
+        if snapshot.time - _slowLastT >= 5.0 {
+            _slowLastT = snapshot.time
+            slowHist.append([snapshot.time,
+                             snapshot.powerFraction * 100,
+                             snapshot.coolantTempK,
+                             pressureMPa,
+                             snapshot.steamPressureMPa,
+                             snapshot.electricPowerW / 1e6,
+                             snapshot.axialOffsetPct,
+                             snapshot.minDNBR,
+                             -1.6 * snapshot.xenonInventory,
+                             boronPPM])
+            if slowHist.count > 4320 { slowHist.removeFirst(slowHist.count - 4320) }
+        }
+    }
+
+    /// Write the slow historian to ~/Downloads as CSV. Returns the file path
+    /// (surfaced via scramMessage-style toast by the caller) or nil on failure.
+    func exportCSV() -> String? {
+        let header = "sim_time_s,power_pct,t_avg_K,rcs_p_MPa,steam_p_MPa,gross_MWe,axial_offset_pct,min_dnbr,xenon_pcm,boron_ppm"
+        var rows = [header]
+        rows.reserveCapacity(slowHist.count + 1)
+        for r in slowHist {
+            rows.append(r.map { String(format: "%.4g", $0) }.joined(separator: ","))
+        }
+        let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+        let stamp = Int(snapshot.time)
+        let url = dir.appendingPathComponent("ReactorSim-\(reactorKind.rawValue)-t\(stamp)s.csv")
+        do {
+            try rows.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+            return url.path
+        } catch { return nil }
     }
 
     // Returns the historian as a time-ordered array starting from oldest
