@@ -34,8 +34,9 @@ private struct MimicKeyParams: View {
             cell("RCS T-AVG", String(format: "%.1f", s.coolantTempK), "K",
                  s.coolantTempK > 616 ? Theme.alarm : Theme.ink)
             sep
-            cell("PZR PRESS", String(format: "%.2f", supervisor.pressureMPa), "MPa",
-                 supervisor.pressureMPa > 17 ? Theme.alarm : Theme.ink)
+            cell(supervisor.hasPressurizer ? "PZR PRESS" : "DOME PRESS",
+                 String(format: "%.2f", supervisor.pressureMPa), "MPa",
+                 supervisor.pressureMPa > supervisor.nominalPressureMPa * 1.097 ? Theme.alarm : Theme.ink)
             sep
             cell("REACTIVITY", pcmString(s.reactivity), "pcm",
                  .reactivityStatus(s.reactivity))
@@ -121,9 +122,13 @@ private struct MimicControlStrip: View {
                             set: { supervisor.rodPosition = $0; supervisor.rodAutoEnabled = false }),
                     { "\(Int((228 * (1 - $0)).rounded())) SWD" },
                     auto: Binding(get: { supervisor.rodAutoEnabled }, set: { supervisor.rodAutoEnabled = $0 }))
-            fader("RCS FLOW",
-                  Binding(get: { supervisor.primaryFlow }, set: { supervisor.primaryFlow = $0 }),
-                  { "\(Int($0 * 100)) %" })
+            // BWR: recirc flow IS the power lever; SMR: natural circulation means
+            // there is no flow lever at all (the fader is hidden, not disabled).
+            if !supervisor.isNaturalCirc {
+                fader(supervisor.reactorKind == .bwr ? "RECIRC" : "RCS FLOW",
+                      Binding(get: { supervisor.primaryFlow }, set: { supervisor.primaryFlow = $0 }),
+                      { "\(Int($0 * 100)) %" })
+            }
             fader("TBN GOV",
                   Binding(get: { supervisor.turbineValve }, set: { supervisor.turbineValve = $0 }),
                   { "\(Int($0 * 100)) %" })
@@ -132,9 +137,12 @@ private struct MimicControlStrip: View {
                             set: { supervisor.feedwaterValve = $0; supervisor.fwAutoEnabled = false }),
                     { "\(Int($0 * 100)) %" },
                     auto: Binding(get: { supervisor.fwAutoEnabled }, set: { supervisor.fwAutoEnabled = $0 }))
-            fader("BORATION",
-                  Binding(get: { supervisor.borationRate }, set: { supervisor.borationRate = $0 }),
-                  { "\(Int($0 * 100)) %" })
+            // No chemical shim on a BWR — the fader would be a dead control.
+            if supervisor.hasBoron {
+                fader("BORATION",
+                      Binding(get: { supervisor.borationRate }, set: { supervisor.borationRate = $0 }),
+                      { "\(Int($0 * 100)) %" })
+            }
 
             // ── Mode / permissive station ──
             VStack(spacing: 5) {

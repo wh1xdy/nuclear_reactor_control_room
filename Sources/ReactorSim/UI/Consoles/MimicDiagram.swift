@@ -56,13 +56,20 @@ struct MimicDiagram: View {
         let steamF  = scram ? 0 : Double(sup.turbineValve)
         let pf      = max(0, snap.powerFraction)
 
+        // Which plant picture to draw. The primary island is kind-specific; the
+        // turbine hall / switchyard / condensate train are shared.
+        let kind = sup.reactorKind
+        // Mass-flow displays scale with the plant rating (an SMR moves ~1/15th
+        // of a 3000 MWt plant's water, not the same 18,800 kg/s).
+        let pScale = sup.nominalMWt / 3000.0
+
         // ── Derived plant numbers (calibrated display values) ────────────────
-        let rcsKgs   = 18_800.0 * flowF                       // total RCS flow
-        let steamKgs = scram ? 0 : 1_650.0 * pf               // main steam flow ∝ power
+        let rcsKgs   = 18_800.0 * flowF * pScale              // total RCS / recirc flow
+        let steamKgs = scram ? 0 : 1_650.0 * pf * pScale      // main steam flow ∝ power
         // Feed delivery: the FW REG valve meters rated flow at its 70% balanced
-        // point, so 0.70 → 1650 kg/s ≈ steam. Under/overfeeding now diverges from
+        // point, so 0.70 → rated ≈ steam. Under/overfeeding now diverges from
         // steam AND is integrated into the S/G level below — they're coupled.
-        let fwKgs    = sup.feedwaterFault ? 0 : 1_650.0 * Double(sup.feedwaterValve) / 0.70
+        let fwKgs    = sup.feedwaterFault ? 0 : 1_650.0 * Double(sup.feedwaterValve) / 0.70 * pScale
         let deltaT   = snap.hotLegTempK - snap.coldLegTempK
         // Pressurizer level follows the T-avg program (~25% no-load → ~60% at the
         // 550 K full-power band), NOT pressure — level and pressure are distinct.
@@ -104,30 +111,47 @@ struct MimicDiagram: View {
         let fp    = CGPoint(x: fx(0.452), y: feedY)        // main feed pump
         let hpFwh = CGRect(x: fx(0.388), y: feedY - fy(0.030), width: fx(0.054), height: fy(0.060))
 
+        // Kind-specific primary-island frames + the steam-source / feed-sink
+        // interface points where the shared secondary connects.
+        // (Placed right of the NEUTRONICS dock so the dome clears its corner.)
+        let bwrV = CGRect(x: fx(0.160), y: fy(0.235), width: fx(0.105), height: fy(0.545))
+        let smrV = CGRect(x: fx(0.160), y: fy(0.245), width: fx(0.100), height: fy(0.520))
+        let steamSrc: CGPoint, feedSink: CGPoint
+        switch kind {
+        case .pwr: steamSrc = sgSteam
+                   feedSink = sgFeed
+        case .bwr: steamSrc = CGPoint(x: bwrV.maxX, y: bwrV.minY + fy(0.050))   // dome nozzle
+                   feedSink = CGPoint(x: bwrV.maxX, y: bwrV.minY + fy(0.210))   // FW sparger
+        case .smr: steamSrc = CGPoint(x: smrV.maxX, y: smrV.minY + fy(0.155))   // integral SG out
+                   feedSink = CGPoint(x: smrV.maxX, y: smrV.minY + fy(0.300))   // integral SG in
+        }
+
         // ════════════════════════════════════════════════════════════════════
         // PIPING  (drawn first so equipment sits on top)
         // ════════════════════════════════════════════════════════════════════
-        // Primary hot leg: vessel hot nozzle → over → down into SG inlet.
-        let hot = [(vessel.maxX, hotY), (fx(0.232), hotY), (fx(0.232), sgHotIn.y), (sgHotIn.x, sgHotIn.y)]
-        // Primary cold leg: SG outlet → across through RCP → vessel cold nozzle.
-        let coldA = [(sgColdOut.x, sgColdOut.y), (rcp.maxX, sgColdOut.y), (rcp.maxX, coldY)]
-        let coldB = [(rcp.minX, coldY), (vessel.maxX, coldY)]
         // Pipe color = the medium it carries / its own temperature. The hot leg
         // renders calm teal at ~565 K and only ramps warm if it heats abnormally;
         // the cold leg reads blue. Color is the instrument, not decoration.
         let cHot   = Theme.colorFor(snap.hotLegTempK, trip: 620)
         let cCold  = Theme.colorFor(snap.coldLegTempK, trip: 620)
         let cSteam = steamF > 0.05 ? Theme.fluidTwoPhase : Theme.fluidExhaust
-        pipe(ctx, hot,   cHot,  4)
-        pipe(ctx, coldA, cCold, 4)
-        pipe(ctx, coldB, cCold, 4)
-        // Surge line PZR → hot leg.
-        pipe(ctx, [(pzr.midX, pzr.maxY), (pzr.midX, hotY)], Theme.ink.opacity(0.45), 2)
+        // PWR external loop: hot leg → SG, SG → RCP → cold leg. (BWR/SMR have no
+        // external primary loop — their islands draw their own circulation.)
+        let hot   = [(vessel.maxX, hotY), (fx(0.232), hotY), (fx(0.232), sgHotIn.y), (sgHotIn.x, sgHotIn.y)]
+        let coldA = [(sgColdOut.x, sgColdOut.y), (rcp.maxX, sgColdOut.y), (rcp.maxX, coldY)]
+        let coldB = [(rcp.minX, coldY), (vessel.maxX, coldY)]
+        if kind == .pwr {
+            pipe(ctx, hot,   cHot,  4)
+            pipe(ctx, coldA, cCold, 4)
+            pipe(ctx, coldB, cCold, 4)
+            // Surge line PZR → hot leg.
+            pipe(ctx, [(pzr.midX, pzr.maxY), (pzr.midX, hotY)], Theme.ink.opacity(0.45), 2)
+        }
 
-        // Main steam: short stub off the nozzle (so the riser clears the tapered
-        // dome instead of running up alongside it), then up to the shaft line, level to HP.
-        let steamRiserX = sgSteam.x + fx(0.018)
-        let steamHdr = [(sgSteam.x, sgSteam.y), (steamRiserX, sgSteam.y), (steamRiserX, hpT.midY), (msiv.x, hpT.midY), (hpT.minX, hpT.midY)]
+        // Main steam: short stub off the source nozzle, then up to the shaft
+        // line, level to HP — shared by every kind (only the source moves).
+        let steamRiserX = steamSrc.x + fx(0.018)
+        let steamHdr = [(steamSrc.x, steamSrc.y), (steamRiserX, steamSrc.y), (steamRiserX, hpT.midY), (msiv.x, hpT.midY), (hpT.minX, hpT.midY)]
         pipe(ctx, steamHdr, cSteam, 3)
         // HP exhaust → MSR → LP (lower-energy exhaust steam) — all on the shaft line.
         pipe(ctx, [(hpT.maxX, hpT.midY), (msr.minX, msr.midY)], Theme.fluidExhaust, 2)
@@ -145,9 +169,10 @@ struct MimicDiagram: View {
         pipe(ctx, [(lpFwh.minX, feedY), (dae.maxX, feedY)], Theme.fluidSubcooled, 3)
         pipe(ctx, [(dae.minX, feedY), (fp.x, feedY)], Theme.fluidSubcooled, 3)
         pipe(ctx, [(fp.x, feedY), (hpFwh.maxX, feedY)], Theme.fluidFeedwater, 3)
-        // FW riser: off the HP-heater LEFT face → out clear of the box → up → S/G feed nozzle.
+        // FW riser: off the HP-heater LEFT face → out clear of the box → up →
+        // the kind's feed nozzle (S/G, BWR sparger, or integral-SG inlet).
         let fwRiserX = hpFwh.minX - fx(0.014)
-        pipe(ctx, [(hpFwh.minX, feedY), (fwRiserX, feedY), (fwRiserX, sgFeed.y), (sgFeed.x, sgFeed.y)], Theme.fluidFeedwater, 3)
+        pipe(ctx, [(hpFwh.minX, feedY), (fwRiserX, feedY), (fwRiserX, feedSink.y), (feedSink.x, feedSink.y)], Theme.fluidFeedwater, 3)
 
         // Steam dump (post-trip heat sink). Taps the header at the MSIV, drops down
         // LEFT of the STEAM CYCLE dock, crosses ABOVE it, then into the condenser via
@@ -165,86 +190,93 @@ struct MimicDiagram: View {
 
         // ── Flow animation: dash speed AND spacing encode mass flow (q). At q≈0
         // the dashes are sparse and nearly frozen, so loss-of-flow reads instantly.
-        flowDash(ctx, hot,   cHot,  flowF, t)
-        flowDash(ctx, coldA, cCold, flowF, t)
-        flowDash(ctx, coldB, cCold, flowF, t)
+        if kind == .pwr {
+            flowDash(ctx, hot,   cHot,  flowF, t)
+            flowDash(ctx, coldA, cCold, flowF, t)
+            flowDash(ctx, coldB, cCold, flowF, t)
+        }
         flowDash(ctx, steamHdr, cSteam, steamF, t)
         flowDash(ctx, [(cond.midX, cond.maxY - fy(0.02)), (cond.midX, feedY), (fwRiserX, feedY),
-                       (fwRiserX, sgFeed.y), (sgFeed.x, sgFeed.y)], Theme.fluidFeedwater,
+                       (fwRiserX, feedSink.y), (feedSink.x, feedSink.y)], Theme.fluidFeedwater,
                  sup.feedwaterFault ? 0 : Double(sup.feedwaterValve), t)
 
         // ── Valves ────────────────────────────────────────────────────────────
         valve(ctx, msiv, open: steamF > 0.02)
 
         // ════════════════════════════════════════════════════════════════════
-        // PRIMARY ISLAND
+        // PRIMARY ISLAND (kind-specific: PWR loop, BWR direct cycle, SMR integral)
         // ════════════════════════════════════════════════════════════════════
         let fuelAlarm = snap.fuelTempK > 1200
-        vesselRPV(ctx, vessel, snap: snap, alarm: fuelAlarm ? Theme.alarm : nil)
-        // nozzle stubs — coloured by their leg's temperature (match the pipe, not
-        // a fixed hot-orange that clashes with the temperature-coded piping).
-        nozzle(ctx, CGPoint(x: vessel.maxX, y: hotY),  cHot)
-        nozzle(ctx, CGPoint(x: vessel.maxX, y: coldY), cCold)
 
-        // Reactor data block under the vessel (bottom is clear).
-        let pcx = vessel.midX
-        reading(ctx, CGPoint(x: pcx, y: vessel.maxY + fy(0.050)),
-                String(format: "%.1f%%", pf * 100),
-                pf > 1.1 ? Theme.alarm : Theme.ink, 15, .center)
-        txt(ctx, "RTP", CGPoint(x: pcx, y: vessel.maxY + fy(0.078)), .center, Theme.textDim, 8)
-        txt(ctx, String(format: "FUEL  %.0f K", snap.fuelTempK),
-            CGPoint(x: pcx, y: vessel.maxY + fy(0.105)), .center,
-            Theme.colorForFuel(snap.fuelTempK), 9)
-        txt(ctx, "\(Int((228 * (1 - snap.rodPosition)).rounded())) SWD",
-            CGPoint(x: pcx, y: vessel.maxY + fy(0.128)), .center, Theme.textDim, 9)
+        switch kind {
+        case .pwr:
+            vesselRPV(ctx, vessel, snap: snap, alarm: fuelAlarm ? Theme.alarm : nil)
+            // nozzle stubs — coloured by their leg's temperature (match the pipe,
+            // not a fixed hot-orange that clashes with the temperature coding).
+            nozzle(ctx, CGPoint(x: vessel.maxX, y: hotY),  cHot)
+            nozzle(ctx, CGPoint(x: vessel.maxX, y: coldY), cCold)
+            reactorDataBlock(ctx, under: vessel, snap: snap, fy: fy)
 
-        // Pressurizer with level + heaters + PORV.
-        let pressAlarm = sup.pressureMPa > 17
-        pressurizer(ctx, pzr, level: pzrLvl, heatersOn: sup.pzrAutoEnabled || sup.pressureMPa < 15.4,
-                    alarm: pressAlarm ? Theme.alarm : nil)
-        reading(ctx, CGPoint(x: pzr.maxX + fx(0.010), y: pzr.minY + fy(0.045)),
-                String(format: "%.2f", sup.pressureMPa), pressAlarm ? Theme.alarm : Theme.ink, 12, .leading)
-        txt(ctx, "MPa", CGPoint(x: pzr.maxX + fx(0.010), y: pzr.minY + fy(0.073)), .leading, Theme.textDim, 8)
-        txt(ctx, String(format: "LVL %.0f%%", pzrLvl * 100),
-            CGPoint(x: pzr.maxX + fx(0.010), y: pzr.minY + fy(0.103)), .leading, Theme.textDim, 9)
-        if sup.porvOpen {
-            txt(ctx, "● PORV OPEN", CGPoint(x: pzr.maxX + fx(0.010), y: pzr.minY + fy(0.130)), .leading, Theme.caution, 9)
+            // Pressurizer with level + heaters + PORV.
+            let pressAlarm = sup.pressureMPa > 17
+            pressurizer(ctx, pzr, level: pzrLvl, heatersOn: sup.pzrAutoEnabled || sup.pressureMPa < 15.4,
+                        alarm: pressAlarm ? Theme.alarm : nil)
+            reading(ctx, CGPoint(x: pzr.maxX + fx(0.010), y: pzr.minY + fy(0.045)),
+                    String(format: "%.2f", sup.pressureMPa), pressAlarm ? Theme.alarm : Theme.ink, 12, .leading)
+            txt(ctx, "MPa", CGPoint(x: pzr.maxX + fx(0.010), y: pzr.minY + fy(0.073)), .leading, Theme.textDim, 8)
+            txt(ctx, String(format: "LVL %.0f%%", pzrLvl * 100),
+                CGPoint(x: pzr.maxX + fx(0.010), y: pzr.minY + fy(0.103)), .leading, Theme.textDim, 9)
+            if sup.porvOpen {
+                txt(ctx, "● PORV OPEN", CGPoint(x: pzr.maxX + fx(0.010), y: pzr.minY + fy(0.130)), .leading, Theme.caution, 9)
+            }
+
+            // RCP on the cold leg.
+            equipBox(ctx, rcp, "", sup.pumpDegraded ? Theme.alarm : nil)
+            pump(ctx, CGPoint(x: rcp.midX, y: rcp.midY), r: min(rcp.width, rcp.height) * 0.30,
+                 running: flowF > 0.1, tint: sup.pumpDegraded ? Theme.alarm : Theme.accent, mirrored: true)
+            txt(ctx, "RCP-1", CGPoint(x: rcp.midX, y: rcp.minY - fy(0.020)), .center, Theme.textHdr, 9)
+            txt(ctx, String(format: "%.0f%%  %.0f", sup.omegaRCP * 100, rcsKgs),
+                CGPoint(x: rcp.midX, y: rcp.maxY + fy(0.022)), .center, Theme.textDim, 8)
+            txt(ctx, "kg/s", CGPoint(x: rcp.midX, y: rcp.maxY + fy(0.042)), .center, Theme.textDim, 7)
+
+            // Hot / cold leg temperature tags on clear pipe runs.
+            reading(ctx, CGPoint(x: vessel.maxX + fx(0.030), y: hotY - fy(0.022)),
+                    String(format: "T-HOT  %.0f K", snap.hotLegTempK), cHot, 10, .leading)
+            reading(ctx, CGPoint(x: vessel.maxX + fx(0.006), y: coldY + fy(0.026)),
+                    String(format: "T-COLD  %.0f K", snap.coldLegTempK), cCold, 9, .leading)
+            txt(ctx, String(format: "ΔT %.0f K", deltaT),
+                CGPoint(x: fx(0.232) + fx(0.006), y: (hotY + sgHotIn.y)/2), .leading, Theme.textDim, 9)
+            // T-avg deviation from the 550 K program (±0.5 K controller deadband).
+            reading(ctx, CGPoint(x: vessel.maxX + fx(0.006), y: coldY + fy(0.046)),
+                    String(format: "Δ %+.1f K", snap.coolantTempK - 550),
+                    Theme.setpointDev(snap.coolantTempK, 550, 0.5), 8, .leading)
+
+            // Steam generator.
+            steamGen(ctx, sg, level: sgLvl, alarm: sup.steamInv < 0.25 ? Theme.alarm : nil)
+            reading(ctx, CGPoint(x: sg.midX, y: sg.maxY + fy(0.038)),
+                    String(format: "%.2f MPa", snap.steamPressureMPa), Theme.ink, 11, .center)
+            txt(ctx, String(format: "%.0f K   LVL %.0f%%", snap.sgTempK, sgLvl * 100),
+                CGPoint(x: sg.midX, y: sg.maxY + fy(0.065)), .center, Theme.textDim, 9)
+
+        case .bwr:
+            drawBWRIsland(ctx, bwrV, w: W, h: H, snap: snap, sup: sup,
+                          level: sgLvl, flowF: flowF, recircKgs: rcsKgs,
+                          fuelAlarm: fuelAlarm, t: t)
+            // Shifted down past the CRD housings under the bottom head.
+            reactorDataBlock(ctx, under: bwrV.offsetBy(dx: 0, dy: fy(0.035)), snap: snap, fy: fy)
+
+        case .smr:
+            drawSMRIsland(ctx, smrV, w: W, h: H, snap: snap, sup: sup,
+                          pzrLvl: pzrLvl, flowF: flowF, natKgs: rcsKgs,
+                          fuelAlarm: fuelAlarm, t: t)
+            reactorDataBlock(ctx, under: smrV.offsetBy(dx: 0, dy: fy(0.030)), snap: snap, fy: fy)
         }
 
-        // RCP on the cold leg.
-        equipBox(ctx, rcp, "", sup.pumpDegraded ? Theme.alarm : nil)
-        pump(ctx, CGPoint(x: rcp.midX, y: rcp.midY), r: min(rcp.width, rcp.height) * 0.30,
-             running: flowF > 0.1, tint: sup.pumpDegraded ? Theme.alarm : Theme.accent, mirrored: true)
-        txt(ctx, "RCP-1", CGPoint(x: rcp.midX, y: rcp.minY - fy(0.020)), .center, Theme.textHdr, 9)
-        txt(ctx, String(format: "%.0f%%  %.0f", sup.omegaRCP * 100, rcsKgs),
-            CGPoint(x: rcp.midX, y: rcp.maxY + fy(0.022)), .center, Theme.textDim, 8)
-        txt(ctx, "kg/s", CGPoint(x: rcp.midX, y: rcp.maxY + fy(0.042)), .center, Theme.textDim, 7)
-
-        // Hot / cold leg temperature tags on clear pipe runs.
-        reading(ctx, CGPoint(x: vessel.maxX + fx(0.030), y: hotY - fy(0.022)),
-                String(format: "T-HOT  %.0f K", snap.hotLegTempK), cHot, 10, .leading)
-        reading(ctx, CGPoint(x: vessel.maxX + fx(0.006), y: coldY + fy(0.026)),
-                String(format: "T-COLD  %.0f K", snap.coldLegTempK), cCold, 9, .leading)
-        txt(ctx, String(format: "ΔT %.0f K", deltaT),
-            CGPoint(x: fx(0.232) + fx(0.006), y: (hotY + sgHotIn.y)/2), .leading, Theme.textDim, 9)
-        // T-avg deviation from the 550 K program (±0.5 K controller deadband).
-        reading(ctx, CGPoint(x: vessel.maxX + fx(0.006), y: coldY + fy(0.046)),
-                String(format: "Δ %+.1f K", snap.coolantTempK - 550),
-                Theme.setpointDev(snap.coolantTempK, 550, 0.5), 8, .leading)
-
-        // ════════════════════════════════════════════════════════════════════
-        // STEAM GENERATOR
-        // ════════════════════════════════════════════════════════════════════
-        steamGen(ctx, sg, level: sgLvl, alarm: sup.steamInv < 0.25 ? Theme.alarm : nil)
-        reading(ctx, CGPoint(x: sg.midX, y: sg.maxY + fy(0.038)),
-                String(format: "%.2f MPa", snap.steamPressureMPa), Theme.ink, 11, .center)
-        txt(ctx, String(format: "%.0f K   LVL %.0f%%", snap.sgTempK, sgLvl * 100),
-            CGPoint(x: sg.midX, y: sg.maxY + fy(0.065)), .center, Theme.textDim, 9)
-        // steam / feed flow tags — placed to the RIGHT of the risers so neither
-        // pipe runs through its label.
-        reading(ctx, CGPoint(x: steamRiserX + fx(0.010), y: sgSteam.y - fy(0.030)),
+        // Steam / feed flow tags — placed to the RIGHT of the risers so neither
+        // pipe runs through its label (shared by every kind).
+        reading(ctx, CGPoint(x: steamRiserX + fx(0.010), y: steamSrc.y - fy(0.030)),
                 String(format: "STM %.0f kg/s", steamKgs), Theme.ink, 9, .leading)
-        reading(ctx, CGPoint(x: steamRiserX + fx(0.010), y: sgFeed.y - fy(0.004)),
+        reading(ctx, CGPoint(x: steamRiserX + fx(0.010), y: feedSink.y - fy(0.016)),
                 String(format: "FW %.0f kg/s", fwKgs),
                 sup.feedwaterFault ? Theme.alarm : Theme.textDim, 9, .leading)
 
@@ -312,8 +344,14 @@ struct MimicDiagram: View {
         // Turbine-generator dock stays put — the gap above it (from lifting the
         // electrical dock) is intentional breathing room.
         drawTurbineGen(ctx, CGRect(x: fx(0.815), y: fy(0.562), width: fx(0.170), height: fy(0.242)), snap: snap, sup: sup)
-        // Fill the empty bottom-left (primary loop) and the centre void (steam cycle).
-        drawPrimaryDock(ctx, CGRect(x: fx(0.150), y: fy(0.815), width: fx(0.175), height: fy(0.165)), snap: snap, sup: sup)
+        // Fill the empty bottom-left (primary loop) and the centre void (steam
+        // cycle). BWR/SMR vessels sit where the PWR vessel block was, so their
+        // dock moves to the far-left column the PWR vessel vacates.
+        switch kind {
+        case .pwr: drawPrimaryDock(ctx, CGRect(x: fx(0.150), y: fy(0.815), width: fx(0.175), height: fy(0.165)), snap: snap, sup: sup)
+        case .bwr: drawBWRDock(ctx, CGRect(x: fx(0.012), y: fy(0.815), width: fx(0.135), height: fy(0.165)), snap: snap, sup: sup, recircKgs: rcsKgs)
+        case .smr: drawSMRDock(ctx, CGRect(x: fx(0.012), y: fy(0.815), width: fx(0.135), height: fy(0.165)), snap: snap, sup: sup, natKgs: rcsKgs)
+        }
         drawSteamCycle(ctx, CGRect(x: fx(0.442), y: fy(0.430), width: fx(0.150), height: fy(0.150)), snap: snap, sup: sup)
         // Fill the lower-right with a dense engineering data page (raw numbers).
         // Sits low + clear of the feed-train labels above it.
@@ -367,12 +405,16 @@ struct MimicDiagram: View {
     /// real trip; a thin left rail carries the standing OK/approach cue, so a
     /// healthy plant is quiet (no wall of green) even on the ISA skins.
     private func drawMarginsStrip(_ ctx: GraphicsContext, _ r: CGRect, snap: PlantSnapshot, sup: PlantSupervisor) {
+        // Pressure margin is referenced to the kind's own trip point (PWR 17 of
+        // 15.5, BWR ~7.7 of 7.0, SMR ~15.2 of 13.8); the level tile is the RPV
+        // level for the vessel-boiling BWR.
+        let nomP = sup.nominalPressureMPa
         let tiles: [(String, Double)] = [
             ("FLUX",   (1.20 - snap.powerFraction) / 0.20),
             ("FUEL-T", (1500 - snap.fuelTempK) / 600),
-            ("RCS-P",  (17.0 - sup.pressureMPa) / 1.5),
+            (sup.reactorKind == .bwr ? "DOME-P" : "RCS-P", (nomP * 1.097 - sup.pressureMPa) / (nomP * 0.097)),
             ("COOL-T", (620 - snap.coolantTempK) / 70),
-            ("SG-LVL", (sup.steamInv - 0.25) / 0.75),
+            (sup.hasSteamGenerator ? "SG-LVL" : "RPV-LVL", (sup.steamInv - 0.25) / 0.75),
         ]
         let tw = r.width / CGFloat(tiles.count)
         ctx.draw(Text("MARGIN TO TRIP").font(.system(size: 7, design: .monospaced)).foregroundColor(Theme.textDim),
@@ -416,7 +458,13 @@ struct MimicDiagram: View {
         y += 20
         let nPitch = max(14, (r.height - 62) / 3)   // 4 rows / 3 gaps, derived from height
         tagRow(ctx, r, y, "PWR TREND", period.0, period.1); y += nPitch
-        tagRow(ctx, r, y, "BORON", String(format: "%.0f ppm", sup.boronPPM), Theme.ink); y += nPitch
+        // BWR has no chemical shim — show the core void it steers with instead.
+        if sup.hasBoron {
+            tagRow(ctx, r, y, "BORON", String(format: "%.0f ppm", sup.boronPPM), Theme.ink)
+        } else {
+            tagRow(ctx, r, y, "CORE VOID", String(format: "%.0f %%", snap.voidFraction * 100), Theme.ink)
+        }
+        y += nPitch
         tagRow(ctx, r, y, "XENON", fmtPcm(xeWorth), Theme.ink); y += nPitch
         tagRow(ctx, r, y, "DECAY HT", String(format: "%.1f %%", decayPct), Theme.ink)
     }
@@ -518,7 +566,9 @@ struct MimicDiagram: View {
         let ao   = snap.axialOffsetPct                  // real: from the axial flux shape
         let lhr  = 6.0 * snap.fq * pf                   // peak linear heat rate ≈ avg × Fq
         let pct  = snap.peakCladTempK                   // real: hottest node clad surface
-        let subcool = tsatK(sup.pressureMPa) - snap.hotLegTempK
+        // BWR: the core EXIT is saturated by design — the meaningful margin is
+        // the INLET subcooling (Tsat − T-cold), not a scary negative number.
+        let subcool = tsatK(sup.pressureMPa) - (sup.reactorKind == .bwr ? snap.coldLegTempK : snap.hotLegTempK)
         let pcm  = snap.reactivity * 1e5
         let sdm  = max(0, 5.2 - snap.rodPosition * 1.5)
         let sgL  = max(8, min(92, sup.feedwaterInv * 62))
@@ -535,10 +585,17 @@ struct MimicDiagram: View {
         let sur = lnR / dtW * 60 / log(10.0)                     // decades per minute
         let period = abs(lnR) < 1e-4 ? 999.0 : min(999, max(-999, dtW / lnR))
         let cA = { (c: Bool) in c ? Theme.alarm : Theme.ink }
-        let dnbrC = dnbr < 1.30 ? Theme.alarm : dnbr < 1.55 ? Theme.caution : Theme.statusNormal
+        // PWR/SMR: W-3 DNBR (design limit ~1.3). BWR: the same CHF ratio reads
+        // as the critical-power margin — label it MCPR with its own bands
+        // (operating MCPR ≈ 1.25–1.4 is NORMAL, not an alarm).
+        let isBWR = sup.reactorKind == .bwr
+        let dnbrLabel = isBWR ? "MCPR" : "DNBR"
+        let dnbrC = isBWR
+            ? (dnbr < 1.15 ? Theme.alarm : dnbr < 1.22 ? Theme.caution : Theme.statusNormal)
+            : (dnbr < 1.30 ? Theme.alarm : dnbr < 1.55 ? Theme.caution : Theme.statusNormal)
 
         let items: [(String, String, Color)] = [
-            ("DNBR",     String(format: "%.2f", dnbr), dnbrC),
+            (dnbrLabel,  String(format: "%.2f", dnbr), dnbrC),
             ("PK LHR",   String(format: "%.1f", lhr) + " kW/ft", cA(lhr > 20)),
             ("AXIAL ΔI", String(format: "%+.0f%%", ao), abs(ao) > 15 ? Theme.caution : Theme.ink),
             ("PK CLAD",  String(format: "%.0f K", pct), pct > 850 ? Theme.alarm : pct > 720 ? Theme.caution : Theme.ink),
@@ -547,15 +604,16 @@ struct MimicDiagram: View {
             ("PERIOD",   abs(period) >= 999 ? "∞ s" : String(format: "%+.0f s", period), Theme.ink),
             ("ρ NET",    fmtPcm(pcm), abs(pcm) > 100 ? Theme.caution : Theme.ink),
             ("SDM",      String(format: "%.1f%%Δk", sdm), sdm < 1.3 ? Theme.alarm : Theme.ink),
-            ("BORON",    String(format: "%.0f ppm", sup.boronPPM), Theme.ink),
+            sup.hasBoron ? ("BORON", String(format: "%.0f ppm", sup.boronPPM), Theme.ink)
+                         : ("VOID",  String(format: "%.0f %%", snap.voidFraction * 100), Theme.ink),
             ("T-HOT",    String(format: "%.0f K", snap.hotLegTempK), Theme.ink),
             ("T-COLD",   String(format: "%.0f K", snap.coldLegTempK), Theme.ink),
             ("ΔT",       String(format: "%.0f K", snap.hotLegTempK - snap.coldLegTempK), Theme.ink),
             ("SUBCOOL",  String(format: "%.0f K", subcool), subcool < 15 ? Theme.alarm : subcool < 30 ? Theme.caution : Theme.ink),
-            ("RCS-P",    String(format: "%.1f MPa", sup.pressureMPa), Theme.ink),
-            ("RCS FLOW", String(format: "%.0f", 18_800 * flow), Theme.ink),
-            ("SG-P",     String(format: "%.1f MPa", snap.steamPressureMPa), Theme.ink),
-            ("SG LVL",   String(format: "%.0f%%", sgL), sgL < 20 ? Theme.alarm : Theme.ink),
+            (sup.reactorKind == .bwr ? "DOME-P" : "RCS-P", String(format: "%.1f MPa", sup.pressureMPa), Theme.ink),
+            ("RCS FLOW", String(format: "%.0f", 18_800 * flow * sup.nominalMWt / 3000), Theme.ink),
+            (sup.hasSteamGenerator ? "SG-P" : "HDR-P", String(format: "%.1f MPa", snap.steamPressureMPa), Theme.ink),
+            (sup.hasSteamGenerator ? "SG LVL" : "RPV LVL", String(format: "%.0f%%", sgL), sgL < 20 ? Theme.alarm : Theme.ink),
             ("GROSS",    String(format: "%.0f MWe", mwe), Theme.elecGold),
             ("CYCLE η",  String(format: "%.1f%%", eta), Theme.ink),
         ]
@@ -677,32 +735,7 @@ struct MimicDiagram: View {
         // Core region with glow + assembly lattice.
         let core = CGRect(x: body.minX + body.width * 0.16, y: body.minY + body.height * 0.42,
                           width: body.width * 0.68, height: body.height * 0.36)
-        // Core incandescence: brightness follows the LIVE axial flux profile
-        // (per-node bands, node 0 at the bottom — the AxialCore orientation),
-        // so rod insertion visibly darkens the top and an axial xenon swing
-        // breathes up and down the core. Falls back to the bulk radial glow if
-        // no profile is available. AUTHENTIC skins stay flat (fluxGlow gates).
-        if snap.axialProfile.isEmpty {
-            let g = max(0, min(1, snap.powerFraction / 1.10))
-            let glow = Theme.fluxGlow(g)
-            ctx.fill(Path(core), with: .radialGradient(
-                Gradient(colors: [glow.center, glow.edge]),
-                center: CGPoint(x: core.midX, y: core.midY),
-                startRadius: 0, endRadius: core.width * 0.7))
-        } else {
-            let n = snap.axialProfile.count
-            let bandH = core.height / CGFloat(n)
-            for i in 0..<n {
-                let gi = max(0, min(1, snap.powerFraction * snap.axialProfile[i] / 1.10))
-                let gl = Theme.fluxGlow(gi)
-                let y = core.maxY - CGFloat(i + 1) * bandH
-                let band = CGRect(x: core.minX, y: y, width: core.width, height: bandH + 0.5)
-                ctx.fill(Path(band), with: .linearGradient(
-                    Gradient(colors: [gl.edge, gl.center, gl.edge]),
-                    startPoint: CGPoint(x: core.minX, y: y),
-                    endPoint: CGPoint(x: core.maxX, y: y)))
-            }
-        }
+        coreBands(ctx, core, snap: snap)
         if snap.powerFraction > 1.10 {
             ctx.stroke(Path(core), with: .color(Theme.alarm.opacity(min(1, (snap.powerFraction - 1.10) / 0.10))), lineWidth: 2)
         } else {
@@ -961,7 +994,7 @@ struct MimicDiagram: View {
         let tg   = sup.turbineGen
         let trip = sup.turbineTrip
         let mwe  = snap.electricPowerW / 1e6
-        let load = max(0, min(1, mwe / 990))
+        let load = max(0, min(1, mwe / max(1, sup.nominalMWe)))
         let rpmC: Color = trip ? (tg.rpm > 1 ? Theme.caution : Theme.alarm) : Theme.ink
         let items: [(String, String, Color)] = [
             ("SPEED",    String(format: "%.0f rpm", tg.rpm), rpmC),
@@ -991,6 +1024,288 @@ struct MimicDiagram: View {
             ctx.draw(Text(it.1).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(it.2),
                      at: CGPoint(x: cx + colW - 14, y: cy), anchor: .trailing)
         }
+    }
+
+    /// Core incandescence: brightness follows the LIVE axial flux profile
+    /// (per-node bands, node 0 at the bottom — the AxialCore orientation), so
+    /// rod insertion visibly darkens one end and an axial xenon swing breathes
+    /// up and down the core. Falls back to the bulk radial glow if no profile
+    /// is available. AUTHENTIC skins stay flat (fluxGlow gates).
+    private func coreBands(_ ctx: GraphicsContext, _ core: CGRect, snap: PlantSnapshot) {
+        if snap.axialProfile.isEmpty {
+            let g = max(0, min(1, snap.powerFraction / 1.10))
+            let glow = Theme.fluxGlow(g)
+            ctx.fill(Path(core), with: .radialGradient(
+                Gradient(colors: [glow.center, glow.edge]),
+                center: CGPoint(x: core.midX, y: core.midY),
+                startRadius: 0, endRadius: core.width * 0.7))
+        } else {
+            let n = snap.axialProfile.count
+            let bandH = core.height / CGFloat(n)
+            for i in 0..<n {
+                let gi = max(0, min(1, snap.powerFraction * snap.axialProfile[i] / 1.10))
+                let gl = Theme.fluxGlow(gi)
+                let y = core.maxY - CGFloat(i + 1) * bandH
+                let band = CGRect(x: core.minX, y: y, width: core.width, height: bandH + 0.5)
+                ctx.fill(Path(band), with: .linearGradient(
+                    Gradient(colors: [gl.edge, gl.center, gl.edge]),
+                    startPoint: CGPoint(x: core.minX, y: y),
+                    endPoint: CGPoint(x: core.maxX, y: y)))
+            }
+        }
+    }
+
+    /// RTP / fuel-temp / rod-position block under the reactor vessel — shared
+    /// by every kind (each island passes its own vessel frame).
+    private func reactorDataBlock(_ ctx: GraphicsContext, under v: CGRect, snap: PlantSnapshot,
+                                  fy: (CGFloat) -> CGFloat) {
+        let pf = max(0, snap.powerFraction)
+        let pcx = v.midX
+        reading(ctx, CGPoint(x: pcx, y: v.maxY + fy(0.050)),
+                String(format: "%.1f%%", pf * 100),
+                pf > 1.1 ? Theme.alarm : Theme.ink, 15, .center)
+        txt(ctx, "RTP", CGPoint(x: pcx, y: v.maxY + fy(0.078)), .center, Theme.textDim, 8)
+        txt(ctx, String(format: "FUEL  %.0f K", snap.fuelTempK),
+            CGPoint(x: pcx, y: v.maxY + fy(0.105)), .center,
+            Theme.colorForFuel(snap.fuelTempK), 9)
+        txt(ctx, "\(Int((228 * (1 - snap.rodPosition)).rounded())) SWD",
+            CGPoint(x: pcx, y: v.maxY + fy(0.128)), .center, Theme.textDim, 9)
+    }
+
+    /// BWR primary island: one big direct-cycle vessel — steam dome + water
+    /// level + separators up top, core (live axial bands) mid-low, control
+    /// blades entering from the BOTTOM (CRD housings below the head), and an
+    /// external recirculation loop. No pressurizer, no SG, no boron.
+    private func drawBWRIsland(_ ctx: GraphicsContext, _ v: CGRect, w: CGFloat, h: CGFloat,
+                               snap: PlantSnapshot, sup: PlantSupervisor,
+                               level: Double, flowF: Double, recircKgs: Double,
+                               fuelAlarm: Bool, t: Double) {
+        func fx(_ x: CGFloat) -> CGFloat { x * w }
+        func fy(_ y: CGFloat) -> CGFloat { y * h }
+        let domeH = v.width * 0.42
+
+        // Recirc loop FIRST (pipes under the vessel shell): suction off the
+        // lower shell → down → pump → back into the bottom head (jet pumps).
+        let loopX = v.maxX + fx(0.045)
+        let sucY  = v.maxY - fy(0.075)
+        let pumpC = CGPoint(x: loopX, y: v.maxY + fy(0.020))
+        let cRe   = Theme.colorFor(snap.coolantTempK, trip: 600)
+        let loop: [(CGFloat, CGFloat)] = [(v.maxX, sucY), (loopX, sucY), (loopX, pumpC.y)]
+        let ret:  [(CGFloat, CGFloat)] = [(loopX, pumpC.y), (v.midX + v.width * 0.28, pumpC.y)]
+        pipe(ctx, loop, cRe, 3)
+        pipe(ctx, ret,  cRe, 3)
+        pipe(ctx, [(v.midX + v.width * 0.28, pumpC.y), (v.midX + v.width * 0.28, v.maxY)], cRe, 3)
+        flowDash(ctx, loop, cRe, flowF, t)
+
+        // Vessel shell: domed top + bottom.
+        var s = Path()
+        s.move(to: CGPoint(x: v.minX, y: v.minY + domeH))
+        s.addQuadCurve(to: CGPoint(x: v.maxX, y: v.minY + domeH),
+                       control: CGPoint(x: v.midX, y: v.minY - domeH * 0.5))
+        s.addLine(to: CGPoint(x: v.maxX, y: v.maxY - domeH * 0.6))
+        s.addQuadCurve(to: CGPoint(x: v.minX, y: v.maxY - domeH * 0.6),
+                       control: CGPoint(x: v.midX, y: v.maxY + domeH * 0.5))
+        s.closeSubpath()
+        ctx.fill(s, with: .color(Theme.equipFill))
+
+        // Water level: fill below the NR level line (steam dome dark above).
+        let lvlY = v.minY + v.height * (0.30 - 0.10 * CGFloat(max(0, min(1, level)) - 0.62))
+        let wetRect = CGRect(x: v.minX + 2, y: lvlY, width: v.width - 4,
+                             height: v.maxY - domeH * 0.6 - lvlY)
+        ctx.fill(Path(wetRect), with: .color(Theme.water.opacity(0.20)))
+        ctx.stroke(Path(CGRect(x: v.minX + 2, y: lvlY, width: v.width - 4, height: 1)),
+                   with: .color(Theme.water.opacity(0.8)), lineWidth: 1)
+
+        // Steam separators / dryers: short standpipes above the level.
+        for i in 0..<4 {
+            let x = v.minX + v.width * (0.22 + 0.19 * CGFloat(i))
+            ctx.stroke(Path { p in
+                p.move(to: CGPoint(x: x, y: lvlY - fy(0.012)))
+                p.addLine(to: CGPoint(x: x, y: lvlY - fy(0.052)))
+            }, with: .color(Theme.ink.opacity(0.30)), lineWidth: 1.5)
+        }
+
+        // Core with the live axial bands (bottom-peaked for a BWR — voids up top).
+        let core = CGRect(x: v.minX + v.width * 0.16, y: v.minY + v.height * 0.42,
+                          width: v.width * 0.68, height: v.height * 0.34)
+        coreBands(ctx, core, snap: snap)
+        if snap.powerFraction > 1.10 {
+            ctx.stroke(Path(core), with: .color(Theme.alarm.opacity(min(1, (snap.powerFraction - 1.10) / 0.10))), lineWidth: 2)
+        } else {
+            ctx.stroke(Path(core), with: .color(Theme.ink.opacity(0.20)), lineWidth: 1)
+        }
+        for gx in 1..<4 {
+            let x = core.minX + core.width * CGFloat(gx) / 4
+            ctx.stroke(Path { p in p.move(to: CGPoint(x: x, y: core.minY)); p.addLine(to: CGPoint(x: x, y: core.maxY)) },
+                       with: .color(Theme.ink.opacity(0.12)), lineWidth: 0.75)
+        }
+
+        // Control blades from the BOTTOM (CRD housings below the bottom head).
+        let rodPos = max(0, min(1, snap.rodPosition))
+        let crdBase = v.maxY + domeH * 0.55
+        for i in 0..<4 {
+            let x = core.minX + core.width * (0.12 + 0.25 * CGFloat(i))
+            ctx.stroke(Path { p in
+                p.move(to: CGPoint(x: x, y: crdBase)); p.addLine(to: CGPoint(x: x, y: crdBase + fy(0.020)))
+            }, with: .color(Theme.ink.opacity(0.32)), lineWidth: 1.5)
+            let depth = (core.height + fy(0.010)) * CGFloat(rodPos)
+            if depth > 1 {
+                ctx.stroke(Path { p in
+                    p.move(to: CGPoint(x: x, y: core.maxY + fy(0.010)))
+                    p.addLine(to: CGPoint(x: x, y: core.maxY + fy(0.010) - depth))
+                }, with: .color(Theme.ink.opacity(0.55)), lineWidth: 2)
+            }
+        }
+
+        ctx.stroke(s, with: .color(fuelAlarm ? Theme.alarm : Theme.ink.opacity(0.35)),
+                   lineWidth: fuelAlarm ? 2 : 1.2)
+        ctx.draw(Text("RPV · BWR").font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(fuelAlarm ? Theme.alarm : Theme.textHdr),
+                 at: CGPoint(x: v.midX, y: v.minY + 10), anchor: .top)
+
+        // Recirc pump + tags.
+        pump(ctx, pumpC, r: fy(0.022), running: flowF > 0.1,
+             tint: sup.pumpDegraded ? Theme.alarm : Theme.accent, mirrored: true)
+        txt(ctx, "RECIRC", CGPoint(x: pumpC.x + fx(0.014), y: pumpC.y - fy(0.006)), .leading,
+            sup.pumpDegraded ? Theme.alarm : Theme.textDim, 8)
+        txt(ctx, String(format: "%.0f kg/s", recircKgs),
+            CGPoint(x: pumpC.x + fx(0.014), y: pumpC.y + fy(0.014)), .leading, Theme.textDim, 8)
+
+        // Dome pressure + level + void tags on the clear left side.
+        let tagX = v.minX - fx(0.008)
+        reading(ctx, CGPoint(x: tagX, y: v.minY + fy(0.045)),
+                String(format: "%.2f MPa", sup.pressureMPa),
+                sup.pressureMPa > sup.nominalPressureMPa * 1.1 ? Theme.alarm : Theme.ink, 11, .trailing)
+        txt(ctx, "DOME", CGPoint(x: tagX, y: v.minY + fy(0.068)), .trailing, Theme.textDim, 8)
+        txt(ctx, String(format: "LVL %.0f%%", level * 100),
+            CGPoint(x: tagX, y: lvlY), .trailing, Theme.textDim, 9)
+        txt(ctx, String(format: "VOID %.0f%%", snap.voidFraction * 100),
+            CGPoint(x: tagX, y: core.minY + fy(0.014)), .trailing, Theme.textDim, 9)
+    }
+
+    /// SMR primary island: NuScale-style integral vessel inside a containment
+    /// capsule — core at the bottom, riser, helical SG coils on the annulus,
+    /// pressurizer space in the head. Natural circulation: no pumps at all.
+    private func drawSMRIsland(_ ctx: GraphicsContext, _ v: CGRect, w: CGFloat, h: CGFloat,
+                               snap: PlantSnapshot, sup: PlantSupervisor,
+                               pzrLvl: Double, flowF: Double, natKgs: Double,
+                               fuelAlarm: Bool, t: Double) {
+        func fx(_ x: CGFloat) -> CGFloat { x * w }
+        func fy(_ y: CGFloat) -> CGFloat { y * h }
+
+        // Containment capsule (flooded pool vessel around the module).
+        let cont = v.insetBy(dx: -fx(0.022), dy: -fy(0.030))
+        ctx.stroke(Path(roundedRect: cont, cornerRadius: cont.width * 0.35, style: .continuous),
+                   with: .color(Theme.ink.opacity(0.18)), lineWidth: 1)
+        txt(ctx, "CNV", CGPoint(x: cont.minX + 4, y: cont.minY + 8), .leading, Theme.textDim, 7)
+
+        // Integral vessel shell.
+        let domeH = v.width * 0.40
+        var s = Path()
+        s.move(to: CGPoint(x: v.minX, y: v.minY + domeH))
+        s.addQuadCurve(to: CGPoint(x: v.maxX, y: v.minY + domeH),
+                       control: CGPoint(x: v.midX, y: v.minY - domeH * 0.5))
+        s.addLine(to: CGPoint(x: v.maxX, y: v.maxY - domeH * 0.6))
+        s.addQuadCurve(to: CGPoint(x: v.minX, y: v.maxY - domeH * 0.6),
+                       control: CGPoint(x: v.midX, y: v.maxY + domeH * 0.5))
+        s.closeSubpath()
+        ctx.fill(s, with: .color(Theme.equipFill))
+
+        // Pressurizer space in the head: level line + heater hint.
+        let pzrY = v.minY + v.height * 0.16
+        let pzLiq = CGRect(x: v.minX + 2, y: pzrY, width: v.width - 4, height: fy(0.030))
+        ctx.fill(Path(pzLiq), with: .color(Theme.water.opacity(0.25)))
+        ctx.stroke(Path(CGRect(x: pzLiq.minX, y: pzrY, width: pzLiq.width, height: 1)),
+                   with: .color(Theme.water.opacity(0.7)), lineWidth: 1)
+        txt(ctx, "PZR", CGPoint(x: v.midX, y: pzrY - fy(0.016)), .center, Theme.textDim, 7)
+        // Baffle between the PZR head and the circulating primary.
+        ctx.stroke(Path { p in
+            p.move(to: CGPoint(x: v.minX + 2, y: pzrY + fy(0.034)))
+            p.addLine(to: CGPoint(x: v.maxX - 2, y: pzrY + fy(0.034)))
+        }, with: .color(Theme.ink.opacity(0.25)), lineWidth: 1)
+
+        // Helical SG coils on the annulus (diagonal hatch both sides of the riser).
+        let coilTop = v.minY + v.height * 0.30, coilBot = v.minY + v.height * 0.56
+        for side in [v.minX + v.width * 0.10, v.maxX - v.width * 0.34] {
+            var y = coilTop
+            while y < coilBot {
+                ctx.stroke(Path { p in
+                    p.move(to: CGPoint(x: side, y: y + fy(0.010)))
+                    p.addLine(to: CGPoint(x: side + v.width * 0.24, y: y))
+                }, with: .color(Theme.ink.opacity(0.30)), lineWidth: 1)
+                y += fy(0.016)
+            }
+        }
+        // Central riser walls.
+        for x in [v.midX - v.width * 0.10, v.midX + v.width * 0.10] {
+            ctx.stroke(Path { p in
+                p.move(to: CGPoint(x: x, y: coilTop)); p.addLine(to: CGPoint(x: x, y: v.minY + v.height * 0.60))
+            }, with: .color(Theme.ink.opacity(0.22)), lineWidth: 1)
+        }
+
+        // Core with the live axial bands.
+        let core = CGRect(x: v.minX + v.width * 0.20, y: v.minY + v.height * 0.62,
+                          width: v.width * 0.60, height: v.height * 0.24)
+        coreBands(ctx, core, snap: snap)
+        ctx.stroke(Path(core), with: .color(Theme.ink.opacity(0.20)), lineWidth: 1)
+
+        // Natural-circulation arrows: up the riser, down the downcomer — their
+        // rate encodes the buoyancy-driven flow.
+        let cNat = Theme.colorFor(snap.coolantTempK, trip: 620)
+        flowDash(ctx, [(v.midX, v.minY + v.height * 0.60), (v.midX, coilTop)], cNat, flowF, t)
+        flowDash(ctx, [(v.minX + v.width * 0.05, coilTop), (v.minX + v.width * 0.05, v.minY + v.height * 0.60)],
+                 Theme.water, flowF, t)
+
+        ctx.stroke(s, with: .color(fuelAlarm ? Theme.alarm : Theme.ink.opacity(0.35)),
+                   lineWidth: fuelAlarm ? 2 : 1.2)
+        ctx.draw(Text("iRPV · SMR").font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(fuelAlarm ? Theme.alarm : Theme.textHdr),
+                 at: CGPoint(x: v.midX, y: v.minY + 10), anchor: .top)
+
+        // Tags on the clear left side.
+        let tagX = cont.minX - fx(0.006)
+        reading(ctx, CGPoint(x: tagX, y: v.minY + fy(0.030)),
+                String(format: "%.2f MPa", sup.pressureMPa),
+                sup.pressureMPa > sup.nominalPressureMPa * 1.1 ? Theme.alarm : Theme.ink, 11, .trailing)
+        txt(ctx, String(format: "PZR %.0f%%", pzrLvl * 100),
+            CGPoint(x: tagX, y: pzrY + fy(0.006)), .trailing, Theme.textDim, 8)
+        txt(ctx, "NAT CIRC", CGPoint(x: tagX, y: v.minY + v.height * 0.45), .trailing,
+            Theme.isFlat ? Theme.textHdr : Theme.statusNormal, 8)
+        txt(ctx, String(format: "%.0f kg/s", natKgs),
+            CGPoint(x: tagX, y: v.minY + v.height * 0.45 + fy(0.020)), .trailing, Theme.textDim, 8)
+    }
+
+    /// BWR lower-left dock: reactor / recirculation picture.
+    private func drawBWRDock(_ ctx: GraphicsContext, _ r: CGRect, snap: PlantSnapshot,
+                             sup: PlantSupervisor, recircKgs: Double) {
+        dockField(ctx, r, "REACTOR · RECIRC")
+        let rowH = max(16, (r.height - 26) / 6)
+        var y = r.minY + 24
+        tagRow(ctx, r, y, "DOME P", String(format: "%.2f MPa", sup.pressureMPa),
+               sup.pressureMPa > sup.nominalPressureMPa * 1.1 ? Theme.alarm : Theme.ink); y += rowH
+        tagRow(ctx, r, y, "RPV LVL", String(format: "%.0f%%", max(8, min(92, sup.feedwaterInv * 62))),
+               sup.feedwaterInv < 0.25 ? Theme.alarm : Theme.ink); y += rowH
+        tagRow(ctx, r, y, "RECIRC", String(format: "%.0f kg/s", recircKgs), Theme.ink); y += rowH
+        tagRow(ctx, r, y, "CORE VOID", String(format: "%.0f%%", snap.voidFraction * 100), Theme.ink); y += rowH
+        tagRow(ctx, r, y, "JET PUMPS", sup.pumpDegraded ? "DEGRADED" : "20 / 20",
+               sup.pumpDegraded ? Theme.alarm : Theme.ink); y += rowH
+        tagRow(ctx, r, y, "SRV", sup.porvOpen ? "● OPEN" : "CLOSED",
+               sup.porvOpen ? Theme.caution : Theme.textDim)
+    }
+
+    /// SMR lower-left dock: integral primary / natural circulation picture.
+    private func drawSMRDock(_ ctx: GraphicsContext, _ r: CGRect, snap: PlantSnapshot,
+                             sup: PlantSupervisor, natKgs: Double) {
+        dockField(ctx, r, "MODULE · NAT CIRC")
+        let rowH = max(16, (r.height - 26) / 6)
+        var y = r.minY + 24
+        tagRow(ctx, r, y, "RCS P", String(format: "%.2f MPa", sup.pressureMPa),
+               sup.pressureMPa > sup.nominalPressureMPa * 1.1 ? Theme.alarm : Theme.ink); y += rowH
+        tagRow(ctx, r, y, "NAT FLOW", String(format: "%.0f kg/s", natKgs), Theme.ink); y += rowH
+        tagRow(ctx, r, y, "ΔT CORE", String(format: "%.0f K", snap.hotLegTempK - snap.coldLegTempK), Theme.ink); y += rowH
+        tagRow(ctx, r, y, "SUBCOOL", String(format: "%.0f K", tsatK(sup.pressureMPa) - snap.hotLegTempK), Theme.ink); y += rowH
+        tagRow(ctx, r, y, "RCPs", "NONE (PASSIVE)", Theme.textDim); y += rowH
+        tagRow(ctx, r, y, "MODULE", "1 / 1 ONLINE", Theme.ink)
     }
 
     private func condenser(_ ctx: GraphicsContext, _ r: CGRect, vacOK: Bool) {
