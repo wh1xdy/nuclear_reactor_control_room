@@ -19,7 +19,7 @@ struct SystemBar: View {
                 Text("UNIT 1")
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(Theme.ink)
-                Text("PWR 3000 MWt")
+                Text("\(supervisor.reactorKind.rawValue.uppercased()) \(Int(supervisor.nominalMWt)) MWt")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(Theme.textDim)
             }

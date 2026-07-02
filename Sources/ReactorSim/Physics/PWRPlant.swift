@@ -37,6 +37,8 @@ struct PlantSnapshot {
     var hotLegTempK:        Double = 565
     var coldLegTempK:       Double = 535
     var steamPressureMPa:   Double = 1.9
+    /// Core-average void fraction (BWR feedback driver; 0 for PWR/SMR).
+    var voidFraction:       Double = 0
     // Axial-nodal outputs (real, from AxialCore — no longer mimic proxies).
     var axialOffsetPct:     Double = 0
     var fz:                 Double = 1.5     // axial peaking
@@ -143,6 +145,7 @@ final class ReactorPlant {
             hotLegTempK:       thermal.tHot,
             coldLegTempK:      thermal.tCold,
             steamPressureMPa:  thermal.steamPressureMPa,
+            voidFraction:      thermal.voidFraction,
             axialOffsetPct:    axial.axialOffsetPct,
             fz:                axial.fz,
             fq:                axial.fq,

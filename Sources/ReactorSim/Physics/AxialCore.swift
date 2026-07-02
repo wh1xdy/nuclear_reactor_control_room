@@ -115,8 +115,11 @@ final class AxialCore {
         // local void deviation is ≈ nominalVoid·(2·cumFrac − 1)·(power/flow).
         // With voidCoeff < 0 that suppresses the top and bottom-peaks the shape
         // — the defining BWR axial driver. Inert for PWR/SMR (voidCoeff = 0).
+        // The 0.30 attenuation accounts for the flux-shape solver seeing the
+        // FULL static void span otherwise (ΔI would pin at −50%); calibrated to
+        // a realistic BWR bottom-peak of ΔI ≈ −15% and Fz ≈ 1.5 at rated.
         let voidScale = p.voidCoeff != 0
-            ? p.nominalVoidFraction * nPos / max(flow, 0.1)
+            ? 0.30 * p.nominalVoidFraction * nPos / max(flow, 0.1)
             : 0
 
         // Per-node reactivity DEVIATION (Δk/k) → shape tilt (mean removed so it
