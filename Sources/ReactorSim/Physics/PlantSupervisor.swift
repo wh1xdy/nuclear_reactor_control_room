@@ -46,6 +46,9 @@ final class PlantSupervisor {
     var simPaused:        Bool  = false { didSet { sound.setPaused(simPaused) } }
     // Core-map popup (opened by tapping the core on the mimic; Esc closes).
     var coreMapOpen:      Bool  = false
+    // Settings sheet visibility — the mimic pauses its 120 Hz canvas behind
+    // modals so sheet scrolling stays smooth (Canvas redraw fights the sheet).
+    var settingsOpen:     Bool  = false
     /// End-of-cycle core: axial-xenon feedback pushed toward divergence.
     var eolCore: Bool = false { didSet { plant.setEndOfCycle(eolCore) } }
     /// Control-room audio (procedural: turbine hum, annunciator chime, breaker clunk).
@@ -55,7 +58,7 @@ final class PlantSupervisor {
     /// this toggle additionally speaks EVERY newly-raised alarm window.
     var voiceAllAlarms: Bool = false
     private var _lastAlarmCount = 0
-    private var _newAlarmMsgs: [String] = []          // raised this step (voice queue)
+    private var _newAlarmMsgs: [(id: String, msg: String)] = []   // raised this step (voice queue)
     private var _prevScrammed = false
     private var _prevTbnTrip  = false
     private var _prevECCS     = false
@@ -210,23 +213,24 @@ final class PlantSupervisor {
         let majorEvent = (scrammed && !_prevScrammed) || (eccsActuated && !_prevECCS)
         if scrammed && !_prevScrammed {
             sound.horn()
-            sound.speak("Reactor trip. Reactor trip.", priority: true)
+            sound.announce(key: "reactor-trip", text: "Reactor trip. Reactor trip.", priority: true)
         }
         if turbineTrip && !_prevTbnTrip && !scrammed {
-            sound.speak("Turbine trip.", priority: true)
+            sound.announce(key: "turbine-trip", text: "Turbine trip.", priority: true)
         }
         if eccsActuated && !_prevECCS {
-            sound.speak("Safety injection initiated.", priority: true)
+            sound.announce(key: "safety-injection", text: "Safety injection initiated.", priority: true)
         }
         _prevScrammed = scrammed; _prevTbnTrip = turbineTrip; _prevECCS = eccsActuated
         // Ordinary new alarms: chime, plus per-alarm voice if enabled — capped
         // per step, and window messages that duplicate a just-spoken major
         // callout (the trip windows) are skipped rather than double-announced.
+        // The alarm ID doubles as the pre-rendered callout key.
         if alarms.count > _lastAlarmCount { sound.chime() }
         _lastAlarmCount = alarms.count
         if voiceAllAlarms {
-            for msg in _newAlarmMsgs.prefix(3) where !(majorEvent && msg.contains("TRIP")) {
-                sound.speak(msg)
+            for item in _newAlarmMsgs.prefix(3) where !(majorEvent && item.msg.contains("TRIP")) {
+                sound.announce(key: item.id.lowercased(), text: item.msg)
             }
         }
         _newAlarmMsgs.removeAll()
@@ -482,7 +486,7 @@ final class PlantSupervisor {
                 _alarmMap[id] = ReactorAlarm(id: id, message: msg, priority: priority,
                                              state: "unack", isTrip: isTrip,
                                              isFirstOut: fo, simTime: snapshot.time)
-                _newAlarmMsgs.append(msg)          // spoken-annunciator queue
+                _newAlarmMsgs.append((id, msg))    // spoken-annunciator queue
             }
         } else {
             // Annunciator latching: an alarm whose condition has cleared stays

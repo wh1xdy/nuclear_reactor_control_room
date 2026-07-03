@@ -50,6 +50,9 @@ struct ContentView: View {
                 startPhysics()
                 startKeyMonitor()
             }
+            .onChange(of: showSettings) { _, open in
+                supervisor.settingsOpen = open      // mimic pauses its canvas behind the sheet
+            }
             .onChange(of: reactorRaw) { _, newVal in
                 // Switching reactor type rebuilds the plant model from scratch.
                 supervisor = PlantSupervisor(kind: (ReactorType(rawValue: newVal) ?? .pwr).kind)
