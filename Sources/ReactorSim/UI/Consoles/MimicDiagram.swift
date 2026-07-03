@@ -17,7 +17,10 @@ struct MimicDiagram: View {
 
     var body: some View {
         GeometryReader { geo in
-            TimelineView(.animation) { context in
+            // Canvas animation pauses behind modals (settings sheet, core map)
+            // — a 120 Hz redraw under a sheet makes its scrolling stutter.
+            TimelineView(.animation(minimumInterval: nil,
+                                    paused: supervisor.settingsOpen || supervisor.coreMapOpen)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
                 Canvas { ctx, size in
                     draw(ctx, size, snap: supervisor.snapshot, sup: supervisor, t: t)

@@ -59,6 +59,12 @@ final class SoundEngine: @unchecked Sendable {
     private var breakerClose: AVAudioPlayer?
     private var breakerOpen:  AVAudioPlayer?
 
+    // ── Pre-rendered PA callouts (Samantha through the sox PA chain; the
+    //    future AI-clone voice replaces these WAVs file-for-file) ────────────
+    private var calloutPlayer: AVAudioPlayer?
+    private var calloutQueue: [URL] = []
+    private var calloutGen = 0            // bumps on flush → stale completions no-op
+
     // ── Procedural-bed parameters (main writes, render reads) ───────────────
     private var humLevel: Double = 0
     private var humPitch: Double = 1
@@ -239,8 +245,10 @@ final class SoundEngine: @unchecked Sendable {
         if paused {
             if voicePlayer.isPlaying { voicePlayer.pause() }
             breakerClose?.pause(); breakerOpen?.pause()
+            calloutPlayer?.pause()
         } else {
             if started, voiceBusy { voicePlayer.play() }
+            if let c = calloutPlayer, c.currentTime > 0 { c.play() }
         }
     }
 
@@ -259,7 +267,43 @@ final class SoundEngine: @unchecked Sendable {
         }
     }
 
-    // MARK: — Helmet voice
+    // MARK: — PA callouts (pre-rendered) + helmet-voice fallback
+
+    /// Announce by KEY: plays the bundled pre-rendered PA sample if present
+    /// (exact sound guaranteed), else falls back to live helmet-chain speech.
+    /// `priority` flushes both the sample queue and the live-voice queue.
+    func announce(key: String, text: String, priority: Bool = false) {
+        guard started, enabled else { return }
+        if let url = Bundle.module.url(forResource: "callout-\(key)", withExtension: "wav") {
+            if priority {
+                calloutGen += 1
+                calloutQueue.removeAll()
+                calloutPlayer?.stop(); calloutPlayer = nil
+                voiceQueue.removeAll(); voicePlayer.stop(); voiceBusy = false
+            }
+            calloutQueue.append(url)
+            pumpCalloutQueue()
+        } else {
+            speak(text, priority: priority)
+        }
+    }
+
+    private func pumpCalloutQueue() {
+        guard started, calloutPlayer == nil, !calloutQueue.isEmpty else { return }
+        let url = calloutQueue.removeFirst()
+        guard let p = try? AVAudioPlayer(contentsOf: url) else { pumpCalloutQueue(); return }
+        p.volume = 0.85
+        calloutPlayer = p
+        if gateTarget > 0 { p.play() }
+        let gen = calloutGen
+        DispatchQueue.main.asyncAfter(deadline: .now() + p.duration + 0.25) { [weak self] in
+            guard let self, self.calloutGen == gen else { return }
+            self.calloutPlayer = nil
+            self.pumpCalloutQueue()
+        }
+    }
+
+    // MARK: — Helmet voice (live synthesis — voice-every-alarm fallback path)
 
     /// Suit-annunciator speech: slow, even, female, processed through the
     /// helmet chain. `priority` flushes anything queued or playing first.
