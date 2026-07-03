@@ -74,8 +74,11 @@ struct SettingsView: View {
                             exportMsg = sup.exportCSV().map { "Saved: \($0)" } ?? "EXPORT FAILED"
                         }
                         choiceRow(symbol: "speaker.wave.2", title: "Control-room audio",
-                                  blurb: "Procedural turbine hum (tracks shaft speed through a coastdown), annunciator chime on new alarms, breaker clunk.",
+                                  blurb: "Procedural turbine hum (tracks shaft speed through a coastdown), annunciator chime, reactor-trip horn, breaker impacts. Major events are always spoken.",
                                   selected: sup.soundEnabled, enabled: true) { sup.soundEnabled.toggle() }
+                        choiceRow(symbol: "person.wave.2", title: "Voice every alarm",
+                                  blurb: "The spoken annunciator calls out EVERY newly-raised alarm window, not just trips and safety injection. Informative, but chatty during transients.",
+                                  selected: sup.voiceAllAlarms, enabled: true) { sup.voiceAllAlarms.toggle() }
                     }
                 }
                 .padding(16)
