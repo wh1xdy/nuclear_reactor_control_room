@@ -249,8 +249,10 @@ struct MimicDiagram: View {
                 CGPoint(x: rcp.midX, y: rcp.maxY + fy(0.022)), .center, Theme.textDim, 8)
             txt(ctx, "kg/s", CGPoint(x: rcp.midX, y: rcp.maxY + fy(0.042)), .center, Theme.textDim, 7)
 
-            // Hot / cold leg temperature tags on clear pipe runs.
-            reading(ctx, CGPoint(x: vessel.maxX + fx(0.030), y: hotY - fy(0.022)),
+            // Hot / cold leg temperature tags on clear pipe runs. T-HOT starts
+            // RIGHT of the pressurizer surge line (pzr.midX) so the vertical
+            // surge pipe never strikes through the text.
+            reading(ctx, CGPoint(x: pzr.midX + fx(0.008), y: hotY - fy(0.022)),
                     String(format: "T-HOT  %.0f K", snap.hotLegTempK), cHot, 10, .leading)
             reading(ctx, CGPoint(x: vessel.maxX + fx(0.006), y: coldY + fy(0.026)),
                     String(format: "T-COLD  %.0f K", snap.coldLegTempK), cCold, 9, .leading)
@@ -300,17 +302,55 @@ struct MimicDiagram: View {
         turbine(ctx, lpT, tripped: trip, stages: 6)
         txt(ctx, "HP", CGPoint(x: hpT.midX, y: hpT.minY - fy(0.024)), .center, Theme.textHdr, 9)
         txt(ctx, "LP TURBINE", CGPoint(x: lpT.midX, y: lpT.minY - fy(0.010)), .center, Theme.textHdr, 9)
-        reading(ctx, CGPoint(x: lpT.midX, y: lpT.maxY + fy(0.030)),
-                trip ? "TRIPPED" : "\(rpm) rpm", trip ? Theme.alarm : Theme.textDim, 9, .center)
+        // Placed LEFT of the LP exhaust drop (which runs down from lpT.midX)
+        // so the pipe never strikes through the text.
+        reading(ctx, CGPoint(x: lpT.midX - fx(0.008), y: lpT.maxY + fy(0.030)),
+                trip ? "TRIPPED" : "\(rpm) rpm", trip ? Theme.alarm : Theme.textDim, 9, .trailing)
 
-        // Generator (driven off the LP shaft).
-        equipBox(ctx, gen, "", trip ? Theme.alarm : nil)
+        // Generator (driven off the LP shaft): proper machine cutaway — casing
+        // with end bells, stator slot ring, rotor on a through-shaft, exciter
+        // on the outboard end, H₂ cooler fins on the roof.
+        let genBody = gen.insetBy(dx: fx(0.006), dy: 0)
+        equipBox(ctx, genBody, "", trip ? Theme.alarm : nil)
+        for bx in [genBody.minX, genBody.maxX] {   // end bells
+            ctx.stroke(Path(ellipseIn: CGRect(x: bx - fx(0.006), y: genBody.minY + fy(0.010),
+                                              width: fx(0.012), height: genBody.height - fy(0.020))),
+                       with: .color(Theme.ink.opacity(0.25)), lineWidth: 1)
+        }
         let gc = CGPoint(x: gen.midX, y: gen.midY)
-        ctx.stroke(Path(ellipseIn: CGRect(x: gc.x - fx(0.016), y: gc.y - fx(0.016),
-                                          width: fx(0.032), height: fx(0.032))),
-                   with: .color(Theme.ink.opacity(0.55)), lineWidth: 1)
-        txt(ctx, "G", gc, .center, Theme.ink, 12)
-        txt(ctx, "GEN", CGPoint(x: gen.midX, y: gen.minY - fy(0.024)), .center, Theme.textHdr, 9)
+        // Radius clamped by the casing half-height so the stator ring stays
+        // inside the frame at any window aspect ratio (fx and fy differ).
+        let statR = min(fx(0.019), genBody.height * 0.44)
+        let rotR  = statR * 0.47
+        // Stator ring with slot ticks.
+        ctx.stroke(Path(ellipseIn: CGRect(x: gc.x - statR, y: gc.y - statR, width: statR * 2, height: statR * 2)),
+                   with: .color(Theme.ink.opacity(0.55)), lineWidth: 1.2)
+        for k in 0..<12 {
+            let a = Double(k) / 12 * 2 * .pi
+            let c1 = CGPoint(x: gc.x + cos(a) * statR * 0.82, y: gc.y + sin(a) * statR * 0.82)
+            let c2 = CGPoint(x: gc.x + cos(a) * statR,        y: gc.y + sin(a) * statR)
+            ctx.stroke(Path { p in p.move(to: c1); p.addLine(to: c2) },
+                       with: .color(Theme.ink.opacity(0.35)), lineWidth: 1)
+        }
+        // Rotor + through-shaft.
+        ctx.fill(Path(ellipseIn: CGRect(x: gc.x - rotR, y: gc.y - rotR, width: rotR * 2, height: rotR * 2)),
+                 with: .color(Theme.ink.opacity(trip ? 0.15 : 0.30)))
+        ctx.stroke(Path { p in
+            p.move(to: CGPoint(x: genBody.minX, y: gc.y)); p.addLine(to: CGPoint(x: gc.x - rotR, y: gc.y))
+            p.move(to: CGPoint(x: gc.x + rotR, y: gc.y));  p.addLine(to: CGPoint(x: genBody.maxX, y: gc.y))
+        }, with: .color(Theme.ink.opacity(0.45)), lineWidth: 2)
+        // Exciter on the outboard end.
+        let exc = CGRect(x: genBody.maxX, y: gc.y - fy(0.016), width: fx(0.012), height: fy(0.032))
+        ctx.fill(Path(roundedRect: exc, cornerRadius: 2), with: .color(Theme.equipFill))
+        ctx.stroke(Path(roundedRect: exc, cornerRadius: 2), with: .color(Theme.ink.opacity(0.30)), lineWidth: 1)
+        // H₂ cooler fins on the roof.
+        for k in 0..<3 {
+            let x = genBody.minX + genBody.width * (0.30 + 0.20 * CGFloat(k))
+            ctx.stroke(Path { p in
+                p.move(to: CGPoint(x: x, y: genBody.minY)); p.addLine(to: CGPoint(x: x, y: genBody.minY - fy(0.012)))
+            }, with: .color(Theme.ink.opacity(0.30)), lineWidth: 1.5)
+        }
+        txt(ctx, "GEN", CGPoint(x: gen.midX, y: gen.minY - fy(0.030)), .center, Theme.textHdr, 9)
         reading(ctx, CGPoint(x: gen.midX, y: gen.maxY + fy(0.032)),
                 trip ? "0 MWe" : String(format: "%.0f MWe", snap.electricPowerW / 1e6),
                 trip ? Theme.alarm : Theme.ink, 13, .center)
@@ -726,14 +766,9 @@ struct MimicDiagram: View {
         ctx.fill(v, with: .color(Theme.equipFill))
         ctx.stroke(v, with: .color(alarm ?? Theme.ink.opacity(0.32)), lineWidth: alarm == nil ? 1 : 2)
 
-        // CRDM stubs above the head — short, uniform drive housings.
+        // CRDM drive housings above the head — SAME x-positions as the rods
+        // below, so each drive line reads as one continuous mechanism.
         let stubBase = body.minY - domeH * 0.38
-        for i in 0..<5 {
-            let x = body.minX + body.width * (0.20 + 0.15 * CGFloat(i))
-            ctx.stroke(Path { p in
-                p.move(to: CGPoint(x: x, y: stubBase)); p.addLine(to: CGPoint(x: x, y: stubBase - body.width * 0.20))
-            }, with: .color(Theme.ink.opacity(0.32)), lineWidth: 1.5)
-        }
 
         // Downcomer annulus.
         for dx in [body.minX + 2.5, body.maxX - 2.5] {
@@ -763,11 +798,20 @@ struct MimicDiagram: View {
         }
 
         // Control rods: enter from the top head, inserted depth ∝ rodPosition.
+        // Each drive is drawn as ONE line: CRDM housing above the dome, then
+        // (continuing at the same x) the rod hanging below the head.
         let rodPos = max(0, min(1, snap.rodPosition))
         let rodTop = body.minY + 4
         let rodSpan = core.maxY - rodTop
         for i in 0..<4 {
             let x = core.minX + core.width * (0.12 + 0.25 * CGFloat(i))
+            // Drive housing + lead screw: one thin line from above the dome all
+            // the way to the rod attachment point — no floating segments.
+            ctx.stroke(Path { p in
+                p.move(to: CGPoint(x: x, y: stubBase - body.width * 0.20))
+                p.addLine(to: CGPoint(x: x, y: rodTop))
+            }, with: .color(Theme.ink.opacity(0.32)), lineWidth: 1.5)
+            // Rod below, hanging from the head at the same x.
             let depth = rodSpan * CGFloat(rodPos)
             if depth > 1 {
                 ctx.stroke(Path { p in
@@ -928,9 +972,11 @@ struct MimicDiagram: View {
         let brkY = fy(0.085)
         let topY = fy(0.054)
 
-        // Generator output lead → GSU low-voltage winding. One straight run into
-        // the lower circle's edge — no bend, so no chamfer artifact at the joint.
-        pipe(ctx, [(gen.maxX, gen.midY), (cx - xfR, gen.midY)], genCol, 2)
+        // Generator output lead → GSU low-voltage winding. Starts at the
+        // exciter's outboard edge (gen.maxX + the casing inset) so the lead
+        // doesn't strike through the exciter box; one straight run into the
+        // lower circle's edge — no bend, so no chamfer artifact at the joint.
+        pipe(ctx, [(gen.maxX + fx(0.006), gen.midY), (cx - xfR, gen.midY)], genCol, 2)
         // GSU transformer (two-winding).
         transformer(ctx, CGPoint(x: cx, y: xfY), r: xfR, live: !g52Open)
         txt(ctx, "GSU 21/400kV", CGPoint(x: cx + xfR + fx(0.005), y: xfY), .leading, Theme.textDim, 7)
