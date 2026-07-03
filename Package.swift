@@ -9,7 +9,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "ReactorSim",
-            path: "Sources/ReactorSim"
+            path: "Sources/ReactorSim",
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "ReactorSimTests",
