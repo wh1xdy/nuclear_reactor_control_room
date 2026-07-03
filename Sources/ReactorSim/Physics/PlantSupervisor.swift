@@ -261,14 +261,14 @@ final class PlantSupervisor {
     /// the turbine trips (no electrical load → overspeed protection).
     func toggleGenBreaker() {
         genBreakerOpen.toggle()
-        sound.clunk()
+        sound.clunk(closing: !genBreakerOpen)
         if genBreakerOpen && !turbineTrip { turbineTrip = true }
     }
     /// One outgoing circuit is redundant (the other carries full load). Opening
     /// BOTH with the generator breaker closed is a full load rejection → trip.
     func toggleLineBreaker(_ i: Int) {
         if i == 0 { line1BreakerOpen.toggle() } else { line2BreakerOpen.toggle() }
-        sound.clunk()
+        sound.clunk(closing: !(i == 0 ? line1BreakerOpen : line2BreakerOpen))
         if line1BreakerOpen && line2BreakerOpen && !genBreakerOpen && !turbineTrip {
             turbineTrip = true
         }
