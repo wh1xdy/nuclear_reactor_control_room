@@ -257,8 +257,11 @@ private struct FlyspeckChart: View {
         Canvas { ctx, size in
             let refAO: Double = supervisor.reactorKind == .bwr ? -20 : -5
             let plot = CGRect(x: 26, y: 14, width: size.width - 32, height: size.height - 26)
-            func px(_ ao: Double) -> CGFloat {   // ΔI → x (ref ± 20 %)
-                plot.minX + plot.width * CGFloat((ao - (refAO - 20)) / 40)
+            // Both axes CLAMP to the plot — a post-scram ΔI swing must pin the
+            // point at the frame edge, never let it wander out of the window.
+            func px(_ ao: Double) -> CGFloat {
+                let f = max(0, min(1, (ao - (refAO - 20)) / 40))   // ref ± 20 %
+                return plot.minX + plot.width * CGFloat(f)
             }
             func py(_ p: Double) -> CGFloat {    // power % → y (0…110)
                 plot.maxY - plot.height * CGFloat(max(0, min(110, p)) / 110)
@@ -302,13 +305,20 @@ private struct FlyspeckChart: View {
                 }
             }
 
-            // Live point — calm in the band, caution outside it.
+            // Live point — calm in the band, caution outside, HOLLOW when the
+            // true value is pinned at the frame (off-scale).
             let ao = supervisor.snapshot.axialOffsetPct
             let pw = supervisor.snapshot.powerFraction * 100
             let inBand = abs(ao - refAO) <= halfW(pw)
+            let offScale = abs(ao - refAO) > 20 || pw > 110
             let dotC: Color = inBand ? (Theme.isFlat ? Theme.ink : Theme.statusNormal) : Theme.caution
             let dot = CGPoint(x: px(ao), y: py(pw))
-            ctx.fill(Path(ellipseIn: CGRect(x: dot.x - 3, y: dot.y - 3, width: 6, height: 6)), with: .color(dotC))
+            if offScale {
+                ctx.stroke(Path(ellipseIn: CGRect(x: dot.x - 3, y: dot.y - 3, width: 6, height: 6)),
+                           with: .color(dotC), lineWidth: 1.5)
+            } else {
+                ctx.fill(Path(ellipseIn: CGRect(x: dot.x - 3, y: dot.y - 3, width: 6, height: 6)), with: .color(dotC))
+            }
             ctx.stroke(Path(ellipseIn: CGRect(x: dot.x - 5.5, y: dot.y - 5.5, width: 11, height: 11)),
                        with: .color(dotC.opacity(0.4)), lineWidth: 1)
 

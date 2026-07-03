@@ -42,7 +42,8 @@ final class PlantSupervisor {
 
     // Sim-clock pause (Esc). Lives here (a reference type) so the 60 Hz timer,
     // which captures the ContentView struct, reads it live rather than stale.
-    var simPaused:        Bool  = false
+    // Pausing also gates the audio (hum/horn/speech go quiet with the physics).
+    var simPaused:        Bool  = false { didSet { sound.setPaused(simPaused) } }
     // Core-map popup (opened by tapping the core on the mimic; Esc closes).
     var coreMapOpen:      Bool  = false
     /// End-of-cycle core: axial-xenon feedback pushed toward divergence.
@@ -50,7 +51,18 @@ final class PlantSupervisor {
     /// Control-room audio (procedural: turbine hum, annunciator chime, breaker clunk).
     let sound = SoundEngine()
     var soundEnabled: Bool = true { didSet { sound.enabled = soundEnabled } }
+    /// Spoken annunciator: major events (trips, safety injection) always speak;
+    /// this toggle additionally speaks EVERY newly-raised alarm window.
+    var voiceAllAlarms: Bool = false
     private var _lastAlarmCount = 0
+    private var _newAlarmMsgs: [String] = []          // raised this step (voice queue)
+    private var _prevScrammed = false
+    private var _prevTbnTrip  = false
+    private var _prevECCS     = false
+    // Rate-of-change tracking (sampled every ~2 sim-s, exponentially smoothed).
+    private var _rateT: Double = -1
+    private var _ratePrev: (tAvg: Double, p: Double, pw: Double) = (550, 15.5, 100)
+    private var _rate: (dT: Double, dP: Double, dPw: Double) = (0, 0, 0)
 
     // MARK: — Automation (all default OFF — manual operation is the trainer's
     // baseline; auto control is the realistic option, not the default)
@@ -192,10 +204,32 @@ final class PlantSupervisor {
         updateAlarms()
         appendHistory()
 
-        // Audio: hum tracks shaft speed; chime once per newly-raised alarm.
+        // ── Audio + spoken annunciator ────────────────────────────────────
         sound.update(rpmFraction: turbineGen.rpm / 3000.0)
+        // Major events: urgent horn on a reactor trip; calm voice callouts.
+        let majorEvent = (scrammed && !_prevScrammed) || (eccsActuated && !_prevECCS)
+        if scrammed && !_prevScrammed {
+            sound.horn()
+            sound.speak("Reactor trip. Reactor trip.", priority: true)
+        }
+        if turbineTrip && !_prevTbnTrip && !scrammed {
+            sound.speak("Turbine trip.", priority: true)
+        }
+        if eccsActuated && !_prevECCS {
+            sound.speak("Safety injection initiated.", priority: true)
+        }
+        _prevScrammed = scrammed; _prevTbnTrip = turbineTrip; _prevECCS = eccsActuated
+        // Ordinary new alarms: chime, plus per-alarm voice if enabled — capped
+        // per step, and window messages that duplicate a just-spoken major
+        // callout (the trip windows) are skipped rather than double-announced.
         if alarms.count > _lastAlarmCount { sound.chime() }
         _lastAlarmCount = alarms.count
+        if voiceAllAlarms {
+            for msg in _newAlarmMsgs.prefix(3) where !(majorEvent && msg.contains("TRIP")) {
+                sound.speak(msg)
+            }
+        }
+        _newAlarmMsgs.removeAll()
     }
 
     // MARK: — Operator actions
@@ -408,6 +442,29 @@ final class PlantSupervisor {
         _check("XE_TRANSIENT", s.xenonInventory > _xeEquilibrium * 1.4 && s.powerFraction < 0.5,
                3, "XENON TRANSIENT IN PROGRESS", isTrip: false)
 
+        // Rate-of-change annunciators (sampled every ~2 sim-s, smoothed so a
+        // frame blip can't chatter the board). Power rate alarms only on the
+        // way UP — a scram's plunge is already announced by the trip windows.
+        if _rateT < 0 { _rateT = s.time; _ratePrev = (s.coolantTempK, pressureMPa, s.powerFraction * 100) }
+        let rdt = s.time - _rateT
+        if rdt >= 2.0 {
+            let raw = ((s.coolantTempK - _ratePrev.tAvg) / rdt,
+                       (pressureMPa - _ratePrev.p) / rdt,
+                       (s.powerFraction * 100 - _ratePrev.pw) / rdt)
+            // Stride-aware smoothing (τ ≈ 4 sim-s regardless of the stride):
+            // at ×600 a step IS the stride (10 s), so a fixed alpha would slow
+            // the annunciator 5× — the board must not depend on playback speed.
+            let a = 1 - exp(-rdt / 4.0)
+            _rate = ((1 - a) * _rate.dT + a * raw.0,
+                     (1 - a) * _rate.dP + a * raw.1,
+                     (1 - a) * _rate.dPw + a * raw.2)
+            _rateT = s.time
+            _ratePrev = (s.coolantTempK, pressureMPa, s.powerFraction * 100)
+        }
+        _check("T_RATE",  abs(_rate.dT) > 0.5,  2, "RCS T-AVG HIGH RATE OF CHANGE", isTrip: false)
+        _check("P_RATE",  abs(_rate.dP) > 0.05, 2, "PZR PRESSURE HIGH RATE",        isTrip: false)
+        _check("PW_RATE", _rate.dPw > 1.5,       2, "REACTOR POWER HIGH RATE",       isTrip: false)
+
         // Auto-trip on any unacknowledged trip
         if _alarmMap.values.contains(where: { $0.isTrip }) {
             scrammed = true
@@ -425,6 +482,7 @@ final class PlantSupervisor {
                 _alarmMap[id] = ReactorAlarm(id: id, message: msg, priority: priority,
                                              state: "unack", isTrip: isTrip,
                                              isFirstOut: fo, simTime: snapshot.time)
+                _newAlarmMsgs.append(msg)          // spoken-annunciator queue
             }
         } else {
             // Annunciator latching: an alarm whose condition has cleared stays
