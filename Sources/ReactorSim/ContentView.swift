@@ -141,12 +141,16 @@ struct ContentView: View {
                 else { supervisor.simPaused.toggle() }
                 return nil
             }
-            handleKey(event)
-            return event
+            // Consume recognized shortcuts — returning the event for a key no
+            // view claims makes macOS play the system "funk" beep (the chime
+            // the user heard on every ACK).
+            return handleKey(event) ? nil : event
         }
     }
 
-    private func handleKey(_ event: NSEvent) {
+    /// Returns true when the key was a recognized shortcut (the monitor then
+    /// consumes the event so macOS doesn't beep about an unclaimed keypress).
+    private func handleKey(_ event: NSEvent) -> Bool {
         let fast = event.modifierFlags.contains(.shift)
         let step = fast ? 0.05 : 0.01
 
@@ -187,9 +191,10 @@ struct ContentView: View {
             case 49:                  // Space — SCRAM
                 if supervisor.scrammed { supervisor.resetScram() }
                 else { supervisor.triggerScram() }
-            default: break
+            default: return false     // not ours — let it propagate
             }
         }
+        return true
     }
 }
 
