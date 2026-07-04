@@ -41,3 +41,36 @@ final class AxialCoreTests: XCTestCase {
         XCTAssertGreaterThan(s.minDNBR, 1.3, "DNBR must remain a sane positive margin")
     }
 }
+
+/// Regression: the startup sequencer after a scram+reset must ascend to power
+/// WITHOUT riding the period into the HIGH FLUX trip (user-reported: "auto
+/// can't handle startup after scram — it scrams due to too high power").
+/// Guards: startup-rate hold on rod withdrawal + the rod-auto flux limiter.
+final class StartupAfterScramTests: XCTestCase {
+    @MainActor
+    func testAutoStartupAfterScramNoRetrip() {
+        let sup = PlantSupervisor()
+        for _ in 0..<600 { sup.step(dt: 1) }                 // settle at power
+        sup.triggerScram()
+        for _ in 0..<180 { sup.step(dt: 1) }                 // rods in, plant cooling
+        sup.acknowledgeAllAlarms()
+        for _ in 0..<10 { sup.step(dt: 1) }                  // acked+cleared windows drop
+        sup.resetScram()
+        sup.step(dt: 1)     // snapshot refreshes on the next step
+        XCTAssertFalse(sup.snapshot.scrammed, "scram reset should be approved: \(sup.scramMessage)")
+
+        sup.startupPermit = true
+        sup.autoStartup = true
+        var maxPf = 0.0
+        var retripped = false
+        for _ in 0..<5400 {
+            sup.step(dt: 1)
+            maxPf = max(maxPf, sup.snapshot.powerFraction)
+            if sup.snapshot.scrammed { retripped = true; break }
+        }
+        XCTAssertFalse(retripped, "auto startup re-scrammed (peak \(maxPf * 100)% RTP)")
+        XCTAssertLessThan(maxPf, 1.19, "power overshoot must stay clear of the 120% trip")
+        XCTAssertGreaterThan(sup.snapshot.powerFraction, 0.85,
+                             "ascension should reach power (got \(sup.snapshot.powerFraction * 100)%)")
+    }
+}
