@@ -210,6 +210,19 @@ final class PlantSupervisor {
         // ── Audio + spoken annunciator ────────────────────────────────────
         sound.update(rpmFraction: turbineGen.rpm / 3000.0)
         // Major events: urgent horn on a reactor trip; calm voice callouts.
+        // ── 52G follows the unit state (fixes "clunk but nothing happens"):
+        // the reverse-power relay OPENS the gen breaker on a turbine trip, and
+        // auto-sync recloses it when the trip clears — so the drawn breaker,
+        // the stored state, and the sound are always the same event.
+        if turbineTrip && !_prevTbnTrip && !genBreakerOpen {
+            genBreakerOpen = true
+            sound.clunk(closing: false)
+        }
+        if !turbineTrip && _prevTbnTrip && genBreakerOpen {
+            genBreakerOpen = false
+            sound.clunk(closing: true)
+        }
+
         let majorEvent = (scrammed && !_prevScrammed) || (eccsActuated && !_prevECCS)
         if scrammed && !_prevScrammed {
             sound.horn()
@@ -255,8 +268,9 @@ final class PlantSupervisor {
         // Demand follows actual position after a trip reset: rods stay inserted
         // until the operator deliberately withdraws (real CRDM behavior).
         rodPosition = snapshot.rodPosition
-        // Re-close the switchyard so the unit can resync after a reset.
-        genBreakerOpen = false; line1BreakerOpen = false; line2BreakerOpen = false
+        // Re-close the transmission circuits; 52G stays with the turbine —
+        // auto-sync recloses it only when the turbine trip actually clears.
+        line1BreakerOpen = false; line2BreakerOpen = false
         scramMessage = "SCRAM RESET APPROVED"
     }
 
@@ -264,6 +278,13 @@ final class PlantSupervisor {
     /// Opening the generator breaker while synchronised is a load rejection —
     /// the turbine trips (no electrical load → overspeed protection).
     func toggleGenBreaker() {
+        // Sync check: closing 52G onto a tripped/dead turbine is REJECTED (no
+        // state change, no sound) — you can't parallel a machine that isn't
+        // at speed. Clear the turbine trip first; auto-sync then recloses.
+        if genBreakerOpen && turbineTrip {
+            scramMessage = "52G CLOSE BLOCKED — SYNC CHECK (turbine tripped)"
+            return
+        }
         genBreakerOpen.toggle()
         sound.clunk(closing: !genBreakerOpen)
         if genBreakerOpen && !turbineTrip { turbineTrip = true }
@@ -303,7 +324,16 @@ final class PlantSupervisor {
                     // reactivity excursion.
                     startupPhase = "ROD WITHDRAWAL — DUMP HOLDS T-AVG"
                     turbineTrip = true
-                    rodPosition = max(0, rodPosition - 0.0053 * dt)   // CRDM max rate
+                    // Startup-rate hold: withdraw only while the power rise is
+                    // controlled (a real operator paces the approach to
+                    // criticality on the startup-rate meter — continuous
+                    // max-rate withdrawal rides the period straight into the
+                    // HIGH FLUX trip after a scram).
+                    if _rate.dPw < 0.25 {
+                        rodPosition = max(0, rodPosition - 0.0053 * dt)
+                    } else {
+                        startupPhase = "ROD HOLD — STARTUP RATE"
+                    }
                     feedwaterValve = max(feedwaterValve, 0.30)
                     fwAutoEnabled = true
                     if pf >= 0.15 {
@@ -328,14 +358,23 @@ final class PlantSupervisor {
             _seqPhase = 0
         }
 
-        // ── Rod auto-control: hold RCS T-avg at 550 K (0.5 K deadband).
-        // Drives the DEMAND at CRDM speed; actual rods are rate-limited anyway.
+        // ── Rod auto-control: hold RCS T-avg at 550 K (0.5 K deadband), with
+        // a FLUX-LIMITER channel on top — above 103% RTP the controller drives
+        // rods IN regardless of temperature (every real rod controller has a
+        // power-limiting channel; T-avg alone reacts too late on an overshoot
+        // because the dump/turbine hold the temperature while flux runs).
         if rodAutoEnabled && !scrammed && snapshot.powerFraction > 0.02 {
-            let err = snapshot.coolantTempK - 550.0
-            if abs(err) > 0.5 {
-                // hot → insert (demand up), cold → withdraw
-                let rate = max(-1.0, min(1.0, err * 0.2)) * 0.0053
-                rodPosition = max(0, min(1, rodPosition + rate * dt))
+            let pf = snapshot.powerFraction
+            if pf > 1.03 {
+                let drive = min(1.0, (pf - 1.03) * 25)          // full rate by ~107%
+                rodPosition = max(0, min(1, rodPosition + 0.0053 * drive * dt))
+            } else {
+                let err = snapshot.coolantTempK - 550.0
+                if abs(err) > 0.5 {
+                    // hot → insert (demand up), cold → withdraw
+                    let rate = max(-1.0, min(1.0, err * 0.2)) * 0.0053
+                    rodPosition = max(0, min(1, rodPosition + rate * dt))
+                }
             }
         }
 
