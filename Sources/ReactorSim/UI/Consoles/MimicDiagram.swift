@@ -780,10 +780,12 @@ struct MimicDiagram: View {
             }, with: .color(Theme.ink.opacity(0.14)), lineWidth: 1)
         }
 
-        // Core region with glow + assembly lattice.
-        let core = CGRect(x: body.minX + body.width * 0.16, y: body.minY + body.height * 0.42,
-                          width: body.width * 0.68, height: body.height * 0.36)
+        // Core region with glow + assembly lattice. Taller than before —
+        // active fuel dominates the vessel height on a real PWR.
+        let core = CGRect(x: body.minX + body.width * 0.16, y: body.minY + body.height * 0.34,
+                          width: body.width * 0.68, height: body.height * 0.48)
         coreBands(ctx, core, snap: snap)
+        fluxScale(ctx, x: body.minX - 26, core: core)
         if snap.powerFraction > 1.10 {
             ctx.stroke(Path(core), with: .color(Theme.alarm.opacity(min(1, (snap.powerFraction - 1.10) / 0.10))), lineWidth: 2)
         } else {
@@ -1085,33 +1087,83 @@ struct MimicDiagram: View {
         }
     }
 
-    /// Core incandescence: brightness follows the LIVE axial flux profile
-    /// (per-node bands, node 0 at the bottom — the AxialCore orientation), so
-    /// rod insertion visibly darkens one end and an axial xenon swing breathes
-    /// up and down the core. Falls back to the bulk radial glow if no profile
-    /// is available. AUTHENTIC skins stay flat (fluxGlow gates).
+    /// Core incandescence: a live 2-D (r,z) flux field — the AXIAL profile
+    /// vertically (linearly interpolated between the 15 nodes, ~3 px rows, so
+    /// the shape reads as a smooth flame rather than chunky bands) times the
+    /// RADIAL ring model horizontally (bright centre channel, dim periphery).
+    /// Rod insertion darkens the top, xenon swings breathe up and down, and a
+    /// flow loss brightens the whole field. Falls back to the bulk radial glow
+    /// if no profile is available. AUTHENTIC skins stay flat (fluxGlow gates).
     private func coreBands(_ ctx: GraphicsContext, _ core: CGRect, snap: PlantSnapshot) {
-        if snap.axialProfile.isEmpty {
+        guard !snap.axialProfile.isEmpty else {
             let g = max(0, min(1, snap.powerFraction / 1.10))
             let glow = Theme.fluxGlow(g)
             ctx.fill(Path(core), with: .radialGradient(
                 Gradient(colors: [glow.center, glow.edge]),
                 center: CGPoint(x: core.midX, y: core.midY),
                 startRadius: 0, endRadius: core.width * 0.7))
-        } else {
-            let n = snap.axialProfile.count
-            let bandH = core.height / CGFloat(n)
-            for i in 0..<n {
-                let gi = max(0, min(1, snap.powerFraction * snap.axialProfile[i] / 1.10))
-                let gl = Theme.fluxGlow(gi)
-                let y = core.maxY - CGFloat(i + 1) * bandH
-                let band = CGRect(x: core.minX, y: y, width: core.width, height: bandH + 0.5)
-                ctx.fill(Path(band), with: .linearGradient(
-                    Gradient(colors: [gl.edge, gl.center, gl.edge]),
-                    startPoint: CGPoint(x: core.minX, y: y),
-                    endPoint: CGPoint(x: core.maxX, y: y)))
-            }
+            return
         }
+        let prof = snap.axialProfile
+        let n = prof.count
+        let rings = snap.radialRings.count == 3 ? snap.radialRings : [1.14, 1.05, 0.81]
+        // Radial factor at normalised radius u ∈ 0…1 (equal-area ring centres).
+        func ringAt(_ u: Double) -> Double {
+            if u < 0.41      { return rings[0] }
+            else if u < 0.71 { return rings[0] + (rings[1] - rings[0]) * (u - 0.41) / 0.30 }
+            else if u < 0.91 { return rings[1] + (rings[2] - rings[1]) * (u - 0.71) / 0.20 }
+            else             { return rings[2] * (1.0 - (u - 0.91) * 0.9) }
+        }
+        let pf = max(0, snap.powerFraction)
+        let rows = max(n, min(72, Int(core.height / 3)))
+        let rowH = core.height / CGFloat(rows)
+        // 7 horizontal gradient stops per row carry the ring profile.
+        let us: [Double] = [1.0, 0.62, 0.30, 0.0, 0.30, 0.62, 1.0]
+        for r in 0..<rows {
+            // Axial value at this row (node 0 at the BOTTOM), linear interp.
+            let z = (Double(r) + 0.5) / Double(rows) * Double(n) - 0.5
+            let i0 = max(0, min(n - 1, Int(floor(z))))
+            let i1 = min(n - 1, i0 + 1)
+            let fz = prof[i0] + (prof[i1] - prof[i0]) * max(0, min(1, z - Double(i0)))
+            let y = core.maxY - CGFloat(r + 1) * rowH
+            let colors = us.map { u -> Color in
+                let g = max(0, min(1, pf * fz * ringAt(u) / 1.15))
+                return Theme.fluxGlow(g).center
+            }
+            let band = CGRect(x: core.minX, y: y, width: core.width, height: rowH + 0.6)
+            ctx.fill(Path(band), with: .linearGradient(
+                Gradient(colors: colors),
+                startPoint: CGPoint(x: core.minX, y: y),
+                endPoint: CGPoint(x: core.maxX, y: y)))
+        }
+    }
+
+    /// Vertical colour scale for the in-vessel flux field: what the core's
+    /// colours MEAN — local power relative to core average (×100, matching the
+    /// core-map popup). Skipped on the AUTHENTIC skins, where colour is
+    /// deliberately absent (numbers carry the information there).
+    private func fluxScale(_ ctx: GraphicsContext, x: CGFloat, core: CGRect) {
+        guard !Theme.isFlat else { return }
+        let barW: CGFloat = 5
+        let steps = 28
+        let stepH = core.height / CGFloat(steps)
+        for i in 0..<steps {
+            let v = 1.3 * Double(i) / Double(steps - 1)          // rel power 0…1.3
+            let c = Theme.fluxGlow(min(1, v / 1.15)).center
+            let y = core.maxY - CGFloat(i + 1) * stepH
+            ctx.fill(Path(CGRect(x: x, y: y, width: barW, height: stepH + 0.5)), with: .color(c))
+        }
+        ctx.stroke(Path(CGRect(x: x, y: core.minY, width: barW, height: core.height)),
+                   with: .color(Theme.ink.opacity(0.25)), lineWidth: 0.75)
+        for (v, label) in [(0.0, "0"), (0.5, "50"), (1.0, "100"), (1.3, "130")] {
+            let y = core.maxY - core.height * CGFloat(v / 1.3)
+            ctx.stroke(Path { p in p.move(to: CGPoint(x: x - 2, y: y)); p.addLine(to: CGPoint(x: x, y: y)) },
+                       with: .color(Theme.textDim), lineWidth: 0.75)
+            ctx.draw(Text(label).font(.system(size: 6, design: .monospaced)).foregroundColor(Theme.textDim),
+                     at: CGPoint(x: x - 4, y: y), anchor: .trailing)
+        }
+        ctx.draw(Text("×100").font(.system(size: 6, design: .monospaced)).foregroundColor(Theme.textDim),
+                 at: CGPoint(x: x + barW / 2, y: core.minY - 7), anchor: .center)
     }
 
     /// RTP / fuel-temp / rod-position block under the reactor vessel — shared
@@ -1185,8 +1237,8 @@ struct MimicDiagram: View {
         }
 
         // Core with the live axial bands (bottom-peaked for a BWR — voids up top).
-        let core = CGRect(x: v.minX + v.width * 0.16, y: v.minY + v.height * 0.42,
-                          width: v.width * 0.68, height: v.height * 0.34)
+        let core = CGRect(x: v.minX + v.width * 0.16, y: v.minY + v.height * 0.40,
+                          width: v.width * 0.68, height: v.height * 0.38)
         coreBands(ctx, core, snap: snap)
         if snap.powerFraction > 1.10 {
             ctx.stroke(Path(core), with: .color(Theme.alarm.opacity(min(1, (snap.powerFraction - 1.10) / 0.10))), lineWidth: 2)
