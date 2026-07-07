@@ -22,6 +22,9 @@ struct MimicConsole: View {
             if supervisor.malfMenuOpen {
                 MalfunctionMenu(supervisor: supervisor)
             }
+            if supervisor.startupPanelOpen {
+                StartupPanel(supervisor: supervisor)
+            }
         }
     }
 }

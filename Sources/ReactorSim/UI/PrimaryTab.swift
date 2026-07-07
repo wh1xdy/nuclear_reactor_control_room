@@ -40,15 +40,25 @@ struct PrimaryTab: View {
                           lo: Double, hi: Double, tripHi: Double?, tripLo: Double?,
                           warnHi: Double?, warnLo: Double?)] {
         let s = supervisor.snapshot
+        let nomP = supervisor.nominalPressureMPa
         // Warn/trip markers match the protection setpoints in updateAlarms()
-        return [
-            ("PZR PRESS", "MPa", supervisor.pressureMPa, 0, 18, 17.0, nil, 16.3, nil),
+        var defs: [(label: String, unit: String, value: Double,
+                    lo: Double, hi: Double, tripHi: Double?, tripLo: Double?,
+                    warnHi: Double?, warnLo: Double?)] = [
+            // Pressure label + scale follow the kind (BWR dome ~7 MPa vs PWR/SMR nominal).
+            (supervisor.hasPressurizer ? "PZR PRESS" : "DOME PRESS", "MPa", supervisor.pressureMPa,
+                0, nomP * 1.16, nomP * 1.097, nil, nomP * 1.05, nil),
             ("T-FUEL",    "K",   s.fuelTempK,   300, 1800, 1500, nil, 1400, nil),
             ("RCS T-AVG", "K",   s.coolantTempK, 300, 700, 620, nil, 610, nil),
-            ("RCP SPEED", "%",   supervisor.omegaRCP * 100, 0, 110, nil, nil, nil, 87),
-            ("RX POWER",  "%",   s.powerFraction * 100, 0, 130, 120, nil, 115, nil),
-            ("REACTIVITY","pcm", s.reactivity * 1e5, -500, 500, nil, nil, nil, nil),
         ]
+        // No coolant pumps on a natural-circulation SMR.
+        if !supervisor.isNaturalCirc {
+            defs.append((supervisor.reactorKind == .bwr ? "RECIRC SPEED" : "RCP SPEED", "%",
+                         supervisor.omegaRCP * 100, 0, 110, nil, nil, nil, 87))
+        }
+        defs.append(("RX POWER",  "%",   s.powerFraction * 100, 0, 130, 120, nil, 115, nil))
+        defs.append(("REACTIVITY","pcm", s.reactivity * 1e5, -500, 500, nil, nil, nil, nil))
+        return defs
     }
 }
 
@@ -56,7 +66,7 @@ private struct DCSGrid: View {
     let supervisor: PlantSupervisor
     var body: some View {
         let s = supervisor.snapshot
-        let nomP = 15.5
+        let nomP = supervisor.nominalPressureMPa
         VStack(spacing: 0) {
             PanelHeader(title: "PRIMARY PARAMETERS")
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
@@ -69,21 +79,27 @@ private struct DCSGrid: View {
         .panelSurface()
     }
 
-    private func readouts(s: PlantSnapshot, nomP: Double) -> [(String, String, Color)] {[
-        ("RX POWER",    String(format: "%6.2f %%",    s.powerFraction * 100),   .powerStatus(s.powerFraction)),
-        ("THERMAL PWR", String(format: "%6.1f MWt",   s.thermalPowerW / 1e6),   Theme.text),
-        ("PZR PRESS",   String(format: "%6.3f MPa",   supervisor.pressureMPa),
-            supervisor.pressureMPa > 17.0 ? Theme.alarm : supervisor.pressureMPa > 16.3 ? Theme.caution : Theme.text),
-        ("T-FUEL AVG",  String(format: "%6.1f K",     s.fuelTempK),
-            s.fuelTempK > 1500 ? Theme.alarm : s.fuelTempK > 1200 ? Theme.caution : Theme.text),
-        ("RCS T-AVG",   String(format: "%6.1f K",     s.coolantTempK),
-            s.coolantTempK > 620 ? Theme.alarm : Theme.text),
-        ("REACTIVITY",  String(format: "%+6.0f pcm",  s.reactivity * 1e5),       .reactivityStatus(s.reactivity)),
-        // Xenon worth = −coeff·X (the old row mistakenly showed TOTAL reactivity)
-        ("XENON WORTH", String(format: "%+6.0f pcm",  s.xenonInventory * -1.6e-5 * 1e5), Theme.textDim),
-        ("RCS BORON",   String(format: "%6.1f ppm",   supervisor.boronPPM),
-            supervisor.boronPPM < 100 ? Theme.caution : Theme.text),
-    ]}
+    private func readouts(s: PlantSnapshot, nomP: Double) -> [(String, String, Color)] {
+        var r: [(String, String, Color)] = [
+            ("RX POWER",    String(format: "%6.2f %%",    s.powerFraction * 100),   .powerStatus(s.powerFraction)),
+            ("THERMAL PWR", String(format: "%6.1f MWt",   s.thermalPowerW / 1e6),   Theme.text),
+            (supervisor.hasPressurizer ? "PZR PRESS" : "DOME PRESS", String(format: "%6.3f MPa", supervisor.pressureMPa),
+                supervisor.pressureMPa > nomP * 1.097 ? Theme.alarm : supervisor.pressureMPa > nomP * 1.05 ? Theme.caution : Theme.text),
+            ("T-FUEL AVG",  String(format: "%6.1f K",     s.fuelTempK),
+                s.fuelTempK > 1500 ? Theme.alarm : s.fuelTempK > 1200 ? Theme.caution : Theme.text),
+            ("RCS T-AVG",   String(format: "%6.1f K",     s.coolantTempK),
+                s.coolantTempK > 620 ? Theme.alarm : Theme.text),
+            ("REACTIVITY",  String(format: "%+6.0f pcm",  s.reactivity * 1e5),       .reactivityStatus(s.reactivity)),
+            // Xenon worth = −coeff·X (the old row mistakenly showed TOTAL reactivity)
+            ("XENON WORTH", String(format: "%+6.0f pcm",  s.xenonInventory * -1.6e-5 * 1e5), Theme.textDim),
+        ]
+        // Soluble boron exists only on PWR/SMR.
+        if supervisor.hasBoron {
+            r.append(("RCS BORON", String(format: "%6.1f ppm", supervisor.boronPPM),
+                      supervisor.boronPPM < 100 ? Theme.caution : Theme.text))
+        }
+        return r
+    }
 }
 
 private struct RCPPanel: View {
@@ -91,14 +107,25 @@ private struct RCPPanel: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(spacing: 6) {
-                LEDIndicator(label: "RCP RUN", on: supervisor.omegaRCP > 0.9, color: Theme.accent)
-                LEDIndicator(label: "PORV",    on: supervisor.porvOpen,        color: Theme.caution)
+                // No coolant pumps on a natural-circulation SMR; a BWR runs recirc pumps.
+                if !supervisor.isNaturalCirc {
+                    LEDIndicator(label: supervisor.reactorKind == .bwr ? "RECIRC RUN" : "RCP RUN",
+                                 on: supervisor.omegaRCP > 0.9, color: Theme.accent)
+                } else {
+                    LEDIndicator(label: "NAT CIRC", on: true, color: Theme.accent)
+                }
+                // Pressurizer relieves via PORV; a BWR relieves via SRVs.
+                LEDIndicator(label: supervisor.hasPressurizer ? "PORV" : "SRV", on: supervisor.porvOpen, color: Theme.caution)
                 LEDIndicator(label: "ECCS",    on: supervisor.eccsActuated,    color: Theme.alarm)
             }
             VStack(alignment: .leading, spacing: 6) {
-                readoutRow("RCP SPEED", String(format: "%5.1f %%", supervisor.omegaRCP * 100),
-                           supervisor.omegaRCP < 0.87 ? Theme.caution : Theme.text)
-                readoutRow("RCS FLOW", String(format: "%5.1f %%", supervisor.primaryFlow * supervisor.omegaRCP * 100), Theme.text)
+                if !supervisor.isNaturalCirc {
+                    readoutRow(supervisor.reactorKind == .bwr ? "RECIRC SPEED" : "RCP SPEED",
+                               String(format: "%5.1f %%", supervisor.omegaRCP * 100),
+                               supervisor.omegaRCP < 0.87 ? Theme.caution : Theme.text)
+                }
+                readoutRow(supervisor.reactorKind == .bwr ? "RECIRC FLOW" : "RCS FLOW",
+                           String(format: "%5.1f %%", supervisor.primaryFlow * supervisor.omegaRCP * 100), Theme.text)
                 readoutRow("FW INV", String(format: "%5.3f", supervisor.feedwaterInv),
                            supervisor.feedwaterInv < 0.1 ? Theme.alarm : Theme.text)
             }
@@ -119,10 +146,13 @@ private struct RCPPanel: View {
 private struct PressPanel: View {
     let supervisor: PlantSupervisor
     var body: some View {
+        let nomP = supervisor.nominalPressureMPa
         VStack(spacing: 0) {
-            PanelHeader(title: "PRESSURIZER")
+            // BWR has no pressurizer — this pane reads the reactor dome instead.
+            PanelHeader(title: supervisor.hasPressurizer ? "PRESSURIZER" : "RPV DOME PRESSURE")
             TrendView(values: supervisor.orderedHistory(supervisor.histPress),
-                      yLo: 13, yHi: 17, color: Theme.accent, label: "PZR PRESS MPa")
+                      yLo: nomP * 0.85, yHi: nomP * 1.1, color: Theme.accent,
+                      label: "\(supervisor.hasPressurizer ? "PZR" : "DOME") PRESS MPa")
                 .padding(8)
                 .frame(height: 120)
         }
