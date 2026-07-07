@@ -30,12 +30,16 @@ private struct ProtectionChannelsPanel: View {
             let s = supervisor.snapshot
 
             // Warn/trip setpoints match the protection system in updateAlarms()
+            // Pressure channel + SG channel labels/setpoints follow the reactor kind.
+            let nomP = supervisor.nominalPressureMPa
             let params: [(String, Double, String, Double, Double?)] = [
                 ("NEUTRON FLUX",  s.powerFraction * 100, "%",    115.0, 120.0),
                 ("T-FUEL AVG",    s.fuelTempK,           "K",   1400.0, 1500.0),
-                ("PZR PRESSURE",  supervisor.pressureMPa,"MPa",   16.3, 17.0),
+                (supervisor.hasPressurizer ? "PZR PRESSURE" : "DOME PRESSURE",
+                                  supervisor.pressureMPa,"MPa",   nomP * 1.05, nomP * 1.097),
                 ("RCS T-AVG",     s.coolantTempK,        "K",    610.0, 620.0),
-                ("SG TEMP",       s.sgTempK,             "K",    600.0, 620.0),
+                (supervisor.hasSteamGenerator ? "SG TEMP" : "DOME TEMP",
+                                  s.sgTempK,             "K",    600.0, 620.0),
             ]
 
             VStack(spacing: 0) {
@@ -137,12 +141,18 @@ private struct AutoControllersPanel: View {
                          description: "T-avg program — drives rod demand at CRDM rate, 0.5 K deadband") {
                     supervisor.rodAutoEnabled.toggle()
                 }
-                autoCard(name: "PRESSURIZER AUTO",
+                // A BWR has no pressurizer — dome pressure is held by the turbine EHC / bypass valves.
+                let nomP = supervisor.nominalPressureMPa
+                autoCard(name: supervisor.hasPressurizer ? "PRESSURIZER AUTO" : "PRESS CTRL (EHC)",
                          enabled: supervisor.pzrAutoEnabled,
-                         setpoint: "15.500 MPa",
+                         setpoint: String(format: "%.3f MPa", nomP),
                          measurement: String(format: "%6.3f MPa", supervisor.pressureMPa),
-                         output: supervisor.pressureMPa < 15.5 ? "OUT HEATERS" : "OUT SPRAY",
-                         description: "Heaters + spray hold primary pressure at 15.5 MPa") {
+                         output: supervisor.hasPressurizer
+                            ? (supervisor.pressureMPa < nomP ? "OUT HEATERS" : "OUT SPRAY")
+                            : "OUT BYPASS VLV",
+                         description: supervisor.hasPressurizer
+                            ? "Heaters + spray hold primary pressure at \(String(format: "%.1f", nomP)) MPa"
+                            : "Turbine inlet/bypass holds dome pressure at \(String(format: "%.1f", nomP)) MPa") {
                     supervisor.pzrAutoEnabled.toggle()
                 }
                 autoCard(name: "FEEDWATER AUTO",

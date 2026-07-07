@@ -139,6 +139,7 @@ struct ContentView: View {
             if event.keyCode == 53 && !showSettings {
                 if supervisor.coreMapOpen { supervisor.coreMapOpen = false }
                 else if supervisor.malfMenuOpen { supervisor.malfMenuOpen = false }
+                else if supervisor.startupPanelOpen { supervisor.startupPanelOpen = false }
                 else { supervisor.simPaused.toggle() }
                 return nil
             }

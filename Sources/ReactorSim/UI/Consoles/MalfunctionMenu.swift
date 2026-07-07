@@ -56,7 +56,32 @@ struct MalfunctionMenu: View {
                 }
                 row("DIESEL FAILURE", "EDGs refuse to start — a grid loss becomes a station blackout",
                     on: supervisor.dieselFault) { supervisor.dieselFault.toggle() }
-                row("RCP DEGRADATION", "reactor coolant pumps coast down", on: supervisor.pumpDegraded) {
+                // Individual pump trips (single-pump loss = LOW-FLOW trip at power).
+                HStack(spacing: 6) {
+                    Text("RCP TRIP").font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                    ForEach(0..<supervisor.rcpCount, id: \.self) { i in
+                        Button {
+                            supervisor.rcpRunning[i].toggle()
+                        } label: {
+                            Text("\(i + 1)")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(supervisor.rcpRunning[i] ? Theme.textDim : Theme.ink)
+                                .frame(width: 26, height: 22)
+                                .contentShape(Rectangle())
+                                .background(RoundedRectangle(cornerRadius: 5)
+                                    .fill(supervisor.rcpRunning[i] ? Theme.dockTint : Theme.alarm.opacity(0.35)))
+                                .overlay(RoundedRectangle(cornerRadius: 5)
+                                    .stroke(Theme.border.opacity(0.6), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.dockTint))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border.opacity(0.6), lineWidth: 1))
+                row("RCP DEGRADATION", "ALL reactor coolant pumps coast down", on: supervisor.pumpDegraded) {
                     supervisor.pumpDegraded.toggle()
                 }
                 row("FEEDWATER FAULT", "main feedwater lost", on: supervisor.feedwaterFault) {
@@ -69,6 +94,7 @@ struct MalfunctionMenu: View {
                     supervisor.atwsFault = false; supervisor.msivClosed = false
                     supervisor.dieselFault = false; supervisor.pumpDegraded = false
                     supervisor.feedwaterFault = false
+                    supervisor.rcpRunning = [true, true, true, true]
                 } label: {
                     Text("CLEAR ALL MALFUNCTIONS")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))

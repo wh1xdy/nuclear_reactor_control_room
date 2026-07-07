@@ -68,6 +68,12 @@ final class PlantSupervisor {
     var simPaused:        Bool  = false { didSet { sound.setPaused(simPaused) } }
     // Core-map popup (opened by tapping the core on the mimic; Esc closes).
     var coreMapOpen:      Bool  = false
+    // Startup-physics popup (tap the NEUTRONICS dock): 1/M, ECP, rod worth.
+    var startupPanelOpen: Bool  = false
+    /// 1/M approach-to-critical points: (withdrawn fraction, CR₀/CR).
+    private(set) var invMPoints: [(x: Double, invM: Double)] = []
+    private var _invMBaseN: Double = 0
+    private var _invMLastRod: Double = 1
     // Settings sheet visibility — the mimic pauses its 120 Hz canvas behind
     // modals so sheet scrolling stays smooth (Canvas redraw fights the sheet).
     var settingsOpen:     Bool  = false
@@ -105,6 +111,14 @@ final class PlantSupervisor {
     private(set) var feedwaterInv: Double = 1.0
     private(set) var steamInv:     Double = 1.0
     private(set) var omegaRCP:     Double = 1.0
+    // Per-pump states (4 RCPs on a PWR, 2 recirc pumps on a BWR, 0 on the
+    // nat-circ SMR). The thermal model consumes the AGGREGATE (omegaRCP =
+    // mean over installed pumps), so the validated physics is untouched;
+    // individual pumps give the trainer single-pump-loss scenarios.
+    var rcpRunning: [Bool] = [true, true, true, true]
+    private(set) var rcpOmega: [Double] = [1, 1, 1, 1]
+    /// Installed reactor-coolant/recirc pump count for the active kind.
+    var rcpCount: Int { plant.params.naturalCirculation ? 0 : (plant.params.kind == .bwr ? 2 : 4) }
     private(set) var porvOpen:     Bool   = false
     private(set) var eccsActuated: Bool   = false
     private(set) var steamDumpValve: Double = 0   // condenser dump (post-trip heat sink)
@@ -156,6 +170,7 @@ final class PlantSupervisor {
     var anyMalfunctionActive: Bool {
         primaryLeakKgs > 0 || sgtrLeakKgs > 0 || stuckRod || droppedRod
             || atwsFault || msivClosed || dieselFault || pumpDegraded || feedwaterFault
+            || rcpRunning.prefix(rcpCount).contains(false)
     }
     private var _alarmMap:    [String: ReactorAlarm] = [:]
     private var _firstOutSet: Bool = false
@@ -303,6 +318,7 @@ final class PlantSupervisor {
         updateBoron(dt: dt)
         updateAlarms()
         appendHistory()
+        recordInvM()
 
         // ── Audio + spoken annunciator ────────────────────────────────────
         sound.update(rpmFraction: turbineGen.rpm / 3000.0)
@@ -528,15 +544,22 @@ final class PlantSupervisor {
     }
 
     private func updateBOP(dt: Double) {
-        // RCP coast-down on pump fault OR loss of station AC (the RCPs are
-        // huge non-ESF loads — diesels do NOT carry them). Natural-circulation
-        // plants (SMR) have no reactor coolant pumps — pin omega to 1.
+        // Per-pump coast/run: a pump spins only if IT is selected running, the
+        // station has AC (RCPs are huge non-ESF loads — diesels don't carry
+        // them), and the legacy degradation fault is clear. The thermal model
+        // sees the aggregate. Natural-circulation plants have no pumps.
         if plant.params.naturalCirculation {
             omegaRCP = 1.0
-        } else if pumpDegraded || !stationACPowered {
-            omegaRCP = max(0.02, omegaRCP - dt / 12.0)
         } else {
-            omegaRCP = min(1.0, omegaRCP + dt / 30.0)
+            let n = rcpCount
+            for i in 0..<n {
+                if rcpRunning[i] && stationACPowered && !pumpDegraded {
+                    rcpOmega[i] = min(1.0, rcpOmega[i] + dt / 30.0)
+                } else {
+                    rcpOmega[i] = max(0.02, rcpOmega[i] - dt / 12.0)
+                }
+            }
+            omegaRCP = rcpOmega.prefix(n).reduce(0, +) / Double(n)
         }
 
         // Steam inventory: SG production follows core heat; the turbine removes it.
@@ -782,6 +805,48 @@ final class PlantSupervisor {
             try rows.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
             return url.path
         } catch { return nil }
+    }
+
+    // MARK: — Startup physics (1/M · ECP · rod worth)
+
+    /// Record 1/M points during a subcritical rod withdrawal: count rate ∝ n,
+    /// baseline taken at the first sample; a fresh scram clears the plot.
+    private func recordInvM() {
+        if scrammed { invMPoints.removeAll(); _invMBaseN = 0; _invMLastRod = 1; return }
+        let rod = snapshot.rodPosition
+        guard snapshot.powerFraction < 0.10, rod < _invMLastRod - 0.01 else { return }
+        _invMLastRod = rod
+        let n = max(snapshot.powerFraction, 1e-9)
+        if _invMBaseN == 0 { _invMBaseN = n }
+        invMPoints.append((x: 1 - rod, invM: min(1.2, _invMBaseN / n)))
+        if invMPoints.count > 80 { invMPoints.removeFirst() }
+    }
+
+    /// Reactivity components [Δk/k] for the ECP block.
+    var rhoComponents: (boron: Double, xenon: Double, mod: Double, dop: Double) {
+        let p = plant.params
+        return (p.externalReactivity,
+                -p.xenonReactivityCoeff * snapshot.xenonInventory,
+                p.coolantTempCoeff * (snapshot.coolantTempK - p.nominalCoolantTemp),
+                p.fuelTempCoeff * (snapshot.fuelTempK - p.nominalFuelTemp))
+    }
+
+    /// Estimated critical position [SWD], from inverting the rod S-curve
+    /// against the non-rod reactivity balance. nil = criticality precluded at
+    /// any rod position (e.g. deep in the xenon peak) — wait or dilute.
+    var ecpSWD: Int? {
+        let p = plant.params
+        let c = rhoComponents
+        let others = c.boron + c.xenon + c.mod + c.dop
+        let wNeeded = others / -p.rodWorth        // rodWorth < 0
+        guard wNeeded >= 0 else { return 228 }    // excess without rods → out
+        guard wNeeded <= 1 else { return nil }    // even fully inserted can't... precluded end
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<40 {
+            let mid = (lo + hi) / 2
+            if 3 * mid * mid - 2 * mid * mid * mid < wNeeded { lo = mid } else { hi = mid }
+        }
+        return Int((228 * (1 - (lo + hi) / 2)).rounded())
     }
 
     // Returns the historian as a time-ordered array starting from oldest
