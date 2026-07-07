@@ -231,12 +231,14 @@ final class AxialCore {
         }
 
         // Azimuthal xenon pair (per axis): flux tilt slaved against the
-        // quadrant xenon imbalance; the imbalance burns back toward zero.
+        // quadrant xenon imbalance; the imbalance burns back toward zero on a
+        // XENON timescale (τ ≈ 10 min here — a rod-drop tilt must persist long
+        // enough to diagnose on the core map, not vanish in a minute).
         let kSlave = 0.9, lamEff = p.lambdaXe + p.xenonBurnCoeff * nPos
         tiltX = -kSlave * tiltXeX
         tiltY = -kSlave * tiltXeY
-        tiltXeX += (0.02 * tiltX * nPos - lamEff * tiltXeX) * dt
-        tiltXeY += (0.02 * tiltY * nPos - lamEff * tiltXeY) * dt
+        tiltXeX += (0.002 * tiltX * nPos - lamEff * tiltXeX) * dt
+        tiltXeY += (0.002 * tiltY * nPos - lamEff * tiltXeY) * dt
     }
 
     /// Excite the azimuthal tilt (future stuck-rod / dropped-rod malfunctions).

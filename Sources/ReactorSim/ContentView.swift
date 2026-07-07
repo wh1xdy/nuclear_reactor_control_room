@@ -138,6 +138,7 @@ struct ContentView: View {
             // menu (space is SCRAM). Skip while the settings sheet is up.
             if event.keyCode == 53 && !showSettings {
                 if supervisor.coreMapOpen { supervisor.coreMapOpen = false }
+                else if supervisor.malfMenuOpen { supervisor.malfMenuOpen = false }
                 else { supervisor.simPaused.toggle() }
                 return nil
             }
@@ -171,6 +172,7 @@ struct ContentView: View {
         case "o": supervisor.rodAutoEnabled = !supervisor.rodAutoEnabled
         case "z": supervisor.pumpDegraded   = !supervisor.pumpDegraded
         case "x": supervisor.feedwaterFault = !supervisor.feedwaterFault
+        case "i": supervisor.malfMenuOpen.toggle()
         case "m": toggleSkin()
         case ",": showSettings.toggle()
         case "c": supervisor.acknowledgeAllAlarms()
