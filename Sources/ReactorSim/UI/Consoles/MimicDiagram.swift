@@ -823,6 +823,32 @@ struct MimicDiagram: View {
                        control: CGPoint(x: body.midX, y: body.maxY + domeH * 0.85))
         v.closeSubpath()
         ctx.fill(v, with: .color(Theme.equipFill))
+
+        // The WHOLE vessel is a thermal map, not just the core: the downcomer
+        // and lower plenum carry cold-leg water, the upper plenum runs at the
+        // hot-leg temperature — so the vessel interior tints with the live
+        // coolant temperatures around the flux field. (Collapses to graphite
+        // on the AUTHENTIC skins because colorFor gates on skin.)
+        do {
+            let cCold = Theme.colorFor(snap.coldLegTempK, trip: 620)
+            let cHot  = Theme.colorFor(snap.hotLegTempK,  trip: 620)
+            let core = CGRect(x: body.minX + body.width * 0.16, y: body.minY + body.height * 0.34,
+                              width: body.width * 0.68, height: body.height * 0.48)
+            var inner = ctx
+            inner.clip(to: v)
+            // Base: cold-leg water everywhere (downcomer + lower plenum + bottom head).
+            inner.fill(Path(CGRect(x: body.minX, y: body.minY - domeH, width: body.width,
+                                   height: body.height + domeH * 1.8)),
+                       with: .color(cCold.opacity(0.10)))
+            // Upper plenum: hot-leg water from the core outlet up into the head,
+            // fading with elevation.
+            let up = CGRect(x: core.minX - 2, y: body.minY - domeH * 0.4,
+                            width: core.width + 4, height: core.minY - body.minY + domeH * 0.4)
+            inner.fill(Path(up), with: .linearGradient(
+                Gradient(colors: [cHot.opacity(0.05), cHot.opacity(0.20)]),
+                startPoint: CGPoint(x: up.midX, y: up.minY),
+                endPoint: CGPoint(x: up.midX, y: up.maxY)))
+        }
         ctx.stroke(v, with: .color(alarm ?? Theme.ink.opacity(0.32)), lineWidth: alarm == nil ? 1 : 2)
 
         // CRDM drive housings above the head — SAME x-positions as the rods
