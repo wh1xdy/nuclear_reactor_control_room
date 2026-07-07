@@ -178,4 +178,7 @@ final class ReactorPlant {
     /// End-of-cycle core mode: strengthens the axial-xenon feedback toward the
     /// marginal/divergent EOL oscillation (the hard flyspeck drill).
     func setEndOfCycle(_ on: Bool) { axial.eolFactor = on ? 1.55 : 1.0 }
+
+    /// Excite the azimuthal flux tilt (stuck / dropped rod malfunctions).
+    func kickTilt(x: Double, y: Double) { axial.kickTilt(x: x, y: y) }
 }

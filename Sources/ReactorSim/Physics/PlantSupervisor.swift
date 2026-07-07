@@ -40,6 +40,28 @@ final class PlantSupervisor {
     var line1BreakerOpen: Bool  = false
     var line2BreakerOpen: Bool  = false
 
+    // MARK: — Auxiliary (station) power — the LOOP/SBO state machine.
+    // GRID: offsite or the unit's own generator feeds the aux buses.
+    // HOUSE LOAD: grid lost but the generator islands onto its own auxiliaries
+    //   (turbine runback to ~8% — Swedish plants drill exactly this).
+    // DIESELS: all AC lost → EDGs crank ~10 s, then carry the ESF buses only
+    //   (AFW motor pump, chargers — NOT the RCPs or circ-water pumps).
+    // BLACKOUT: diesels failed/cranking → batteries only, clock ticking.
+    enum AuxPowerState: String { case grid = "GRID", houseLoad = "HOUSE LOAD",
+                                 diesel = "DIESELS", sbo = "BLACKOUT" }
+    private(set) var auxPower: AuxPowerState = .grid
+    private(set) var dieselsRunning = false
+    private(set) var dieselTimer: Double = 0          // crank progress [s]
+    private(set) var batteryMin: Double = 120         // SBO battery clock [min]
+    private(set) var afwRunning = false               // turbine-driven aux feed
+    private(set) var srvOpen = false                  // SG safety valves venting
+    var dieselFault = false                           // malfunction hook (menu)
+    private var _prevOffsite = true
+    private var _prevDiesels = false
+    private var _prevSBO = false
+    /// Station AC available for the big non-ESF loads (RCPs, circ water, main FW).
+    var stationACPowered: Bool { (!turbineTrip && !genBreakerOpen) || !(line1BreakerOpen && line2BreakerOpen) }
+
     // Sim-clock pause (Esc). Lives here (a reference type) so the 60 Hz timer,
     // which captures the ContentView struct, reads it live rather than stale.
     // Pausing also gates the audio (hum/horn/speech go quiet with the physics).
@@ -113,6 +135,28 @@ final class PlantSupervisor {
     /// Turbine-generator electrical (AVR/excitation → MVAr) + mechanical
     /// supervision states — the mimic reads these instead of static gauges.
     let turbineGen = TurbineGenerator()
+    /// Containment atmosphere (pressure/temp/sump + spray). Sources: PORV
+    /// relief-tank venting and the malfunction menu's primary leak.
+    let containment = Containment()
+    /// Primary-side break flow into containment [kg/s] — set by the LOCA
+    /// malfunction; 0 in normal operation.
+    var primaryLeakKgs: Double = 0
+
+    // MARK: — Malfunctions (instructor menu). Each is an independent latched
+    // fault with real physics; CLEAR ALL restores the plant systems (the
+    // transient they caused still has to be recovered by the operator).
+    var malfMenuOpen = false                 // instructor panel visibility
+    var sgtrLeakKgs: Double = 0              // SG tube rupture: primary → secondary
+    var stuckRod = false                     // one RCCA frozen: tilt + degraded scram worth
+    var droppedRod = false                   // one RCCA on the bottom: −350 pcm + tilt
+    var atwsFault = false                    // reactor protection fails to scram
+    var msivClosed = false                   // spurious main-steam isolation
+    private var _rodMalfApplied = false
+    /// Any instructor fault engaged (tints the MALFUNCTIONS chip).
+    var anyMalfunctionActive: Bool {
+        primaryLeakKgs > 0 || sgtrLeakKgs > 0 || stuckRod || droppedRod
+            || atwsFault || msivClosed || dieselFault || pumpDegraded || feedwaterFault
+    }
     private var _alarmMap:    [String: ReactorAlarm] = [:]
     private var _firstOutSet: Bool = false
     private var _histIdx:     Int  = 0
@@ -172,22 +216,68 @@ final class PlantSupervisor {
 
     func step(dt: Double) {
         updateAutomation(dt: dt)
+        updateAuxPower(dt: dt)
         // Turbine trips automatically on reactor scram (standard interlock).
         if scrammed { turbineTrip = true }
+        // House-load operation: islanded on our own auxiliaries — the governor
+        // runs the turbine back to just carry the station load (~8%).
+        if auxPower == .houseLoad { turbineValve = min(turbineValve, 0.08) }
         // With the turbine tripped, condenser STEAM DUMP becomes the SG heat
-        // sink: a proportional valve holds no-load T_avg ≈ 550 K. Without it,
-        // stored + decay heat bottles up the SG and the plant overheats with
-        // no recovery path.
-        let effectiveValve = turbineTrip
-            ? max(0, min(0.2, 0.02 * (snapshot.coolantTempK - 550.0)))
-            : turbineValve
-        steamDumpValve = turbineTrip ? effectiveValve : 0
+        // sink IF the condenser still has vacuum (circ-water pumps are big
+        // non-ESF loads — a LOOP takes them, the vacuum collapses, and the SG
+        // safety valves become the only heat path, venting to atmosphere).
+        let vacuumOK = stationACPowered && condTempK < 340
+        let dumpValve = vacuumOK ? max(0, min(0.35, 0.02 * (snapshot.coolantTempK - 550.0))) : 0
+        // SRVs: lift/reseat with hysteresis on SG (steam) pressure. Physical
+        // valves — they backstop EVERY configuration (trip, house load, SBO).
+        if plant.params.hasSteamGenerator {
+            if snapshot.steamPressureMPa > 7.9 { srvOpen = true }
+            if snapshot.steamPressureMPa < 7.4 { srvOpen = false }
+        } else { srvOpen = false }
+        let srvValve = srvOpen ? min(0.15, 0.08 * (snapshot.steamPressureMPa - 7.4)) : 0
+        // SG heat removal: turbine when latched; on a house-load runback the
+        // DUMP carries the shed load (that's how a real runback survives —
+        // turbine to ~8 %, dump takes the rest, rods walk power down); after a
+        // trip the dump holds no-load T-avg while vacuum lasts.
+        // Spurious MSIV closure: turbine AND dump are downstream of the MSIVs —
+        // only the SG safety valves can still relieve. The turbine trips on
+        // loss of steam.
+        if msivClosed && !turbineTrip { turbineTrip = true }
+        let effectiveValve: Double
+        if msivClosed {
+            effectiveValve = srvValve
+        } else if turbineTrip {
+            effectiveValve = dumpValve + srvValve
+        } else if auxPower == .houseLoad {
+            effectiveValve = turbineValve + dumpValve + srvValve
+        } else {
+            effectiveValve = turbineValve + srvValve
+        }
+        steamDumpValve = dumpValve > 0 && !msivClosed && (turbineTrip || auxPower == .houseLoad) ? dumpValve : 0
+
+        // Rod malfunctions: apply the flux tilt (and degraded scram worth for a
+        // stuck RCCA) once on engagement; restore the worth on clear.
+        if (stuckRod || droppedRod) && !_rodMalfApplied {
+            _rodMalfApplied = true
+            plant.kickTilt(x: droppedRod ? -0.05 : 0.04, y: 0.025)
+            if stuckRod { plant.params.scramExtraWorth = -0.102 }   // one RCCA short
+        }
+        if !(stuckRod || droppedRod) && _rodMalfApplied {
+            _rodMalfApplied = false
+            plant.params.scramExtraWorth = -0.12
+        }
         // Natural circulation (SMR): coolant flow is buoyancy-driven and rises
         // with power — the operator can't pump harder. Otherwise flow is the
-        // pump/recirc demand scaled by RCP speed.
-        let effFlow = plant.params.naturalCirculation
+        // pump/recirc demand scaled by RCP speed, with a natural-circulation
+        // FLOOR once the pumps coast down (a dead-pump PWR still convects —
+        // this is what carries decay heat through a station blackout).
+        var effFlow = plant.params.naturalCirculation
             ? min(1.0, 0.25 + 0.75 * max(0, snapshot.powerFraction).squareRoot())
             : primaryFlow * omegaRCP
+        if !plant.params.naturalCirculation {
+            let natFloor = 0.06 + 0.10 * max(0, snapshot.powerFraction).squareRoot()
+            effFlow = max(effFlow, natFloor)
+        }
         let ctrl = ControlInputs(
             rodPosition:    rodPosition,
             primaryFlow:    effFlow,
@@ -202,6 +292,13 @@ final class PlantSupervisor {
         turbineGen.step(dt: dt, grossMWe: snapshot.electricPowerW / 1e6,
                         tripped: turbineTrip || genBreakerOpen || (line1BreakerOpen && line2BreakerOpen),
                         ratedMWe: nominalMWe)
+        // Containment atmosphere: fed by any primary break (LOCA malfunction)
+        // plus PORV discharge once the relief tank vents; coolers need AC,
+        // spray needs the ESF buses (diesels suffice).
+        containment.step(dt: dt,
+                         releaseKgs: primaryLeakKgs + (porvOpen ? 6 : 0),
+                         acPowered: stationACPowered || dieselsRunning,
+                         esfAvailable: stationACPowered || dieselsRunning)
         updateBOP(dt: dt)
         updateBoron(dt: dt)
         updateAlarms()
@@ -235,6 +332,22 @@ final class PlantSupervisor {
             sound.announce(key: "safety-injection", text: "Safety injection initiated.", priority: true)
         }
         _prevScrammed = scrammed; _prevTbnTrip = turbineTrip; _prevECCS = eccsActuated
+        // LOOP-ladder callouts (grid gone / diesels up / blackout) + diesel sound.
+        let offsiteNow = !(line1BreakerOpen && line2BreakerOpen)
+        if !offsiteNow && _prevOffsite {
+            sound.announce(key: "loop", text: "Loss of offsite power.", priority: true)
+        }
+        _prevOffsite = offsiteNow
+        if dieselsRunning && !_prevDiesels {
+            sound.announce(key: "dg_run", text: "Diesel generators running.")
+        }
+        _prevDiesels = dieselsRunning
+        let sboNow = auxPower == .sbo && dieselTimer > 12
+        if sboNow && !_prevSBO {
+            sound.announce(key: "sbo", text: "Station blackout. Station blackout.", priority: true)
+        }
+        _prevSBO = sboNow
+        sound.setDiesel(dieselsRunning ? 2 : (auxPower == .sbo && dieselTimer > 0 && dieselTimer < 10 && !dieselFault ? 1 : 0))
         // Ordinary new alarms: chime, plus per-alarm voice if enabled — capped
         // per step, and window messages that duplicate a just-spoken major
         // callout (the trip windows) are skipped rather than double-announced.
@@ -252,6 +365,9 @@ final class PlantSupervisor {
     // MARK: — Operator actions
 
     func triggerScram() {
+        // ATWS malfunction: the reactor protection system fails to act — the
+        // drill is emergency boration, not the scram button.
+        guard !atwsFault else { scramMessage = "RPS FAILURE — RODS DID NOT INSERT"; return }
         scrammed = true
     }
 
@@ -289,14 +405,13 @@ final class PlantSupervisor {
         sound.clunk(closing: !genBreakerOpen)
         if genBreakerOpen && !turbineTrip { turbineTrip = true }
     }
-    /// One outgoing circuit is redundant (the other carries full load). Opening
-    /// BOTH with the generator breaker closed is a full load rejection → trip.
+    /// One outgoing circuit is redundant (the other carries full load).
+    /// Opening BOTH while generating no longer force-trips the unit — the
+    /// generator ISLANDS onto house load (governor runback); the aux-power
+    /// state machine takes it from there. Losing the gen too → diesels/SBO.
     func toggleLineBreaker(_ i: Int) {
         if i == 0 { line1BreakerOpen.toggle() } else { line2BreakerOpen.toggle() }
         sound.clunk(closing: !(i == 0 ? line1BreakerOpen : line2BreakerOpen))
-        if line1BreakerOpen && line2BreakerOpen && !genBreakerOpen && !turbineTrip {
-            turbineTrip = true
-        }
     }
 
     func acknowledgeAllAlarms() {
@@ -389,13 +504,37 @@ final class PlantSupervisor {
 
     // MARK: — BOP
 
+    /// The LOOP/SBO ladder. Evaluated every step; transitions announce below.
+    private func updateAuxPower(dt: Double) {
+        let genOnline = !turbineTrip && !genBreakerOpen
+        let offsite   = !(line1BreakerOpen && line2BreakerOpen)
+        if offsite || genOnline {
+            auxPower = offsite && !genOnline ? .grid : (offsite ? .grid : .houseLoad)
+            dieselsRunning = false
+            dieselTimer = 0
+            batteryMin = min(120, batteryMin + dt / 120)   // chargers restore slowly
+        } else if dieselsRunning {
+            auxPower = .diesel
+        } else if dieselFault {
+            auxPower = .sbo
+            batteryMin = max(0, batteryMin - dt / 60)
+        } else {
+            // EDGs cranking (~10 s) — on batteries until they pick up.
+            auxPower = .sbo
+            dieselTimer += dt
+            batteryMin = max(0, batteryMin - dt / 60)
+            if dieselTimer >= 10 { dieselsRunning = true }
+        }
+    }
+
     private func updateBOP(dt: Double) {
-        // RCP coast-down on pump fault. Natural-circulation plants (SMR) have
-        // no reactor coolant pumps — flow is set in step(), so pin omega to 1.
+        // RCP coast-down on pump fault OR loss of station AC (the RCPs are
+        // huge non-ESF loads — diesels do NOT carry them). Natural-circulation
+        // plants (SMR) have no reactor coolant pumps — pin omega to 1.
         if plant.params.naturalCirculation {
             omegaRCP = 1.0
-        } else if pumpDegraded {
-            omegaRCP = max(0.04, omegaRCP - dt / 12.0)
+        } else if pumpDegraded || !stationACPowered {
+            omegaRCP = max(0.02, omegaRCP - dt / 12.0)
         } else {
             omegaRCP = min(1.0, omegaRCP + dt / 30.0)
         }
@@ -413,15 +552,28 @@ final class PlantSupervisor {
 
         // Condenser temp: first-order ODE solved EXACTLY (stable at 600× speed;
         // explicit Euler diverges for dt > 2.5 s with this 0.8/s rate constant).
+        // Without station AC the circ-water pumps stop and the vacuum collapses.
         let steamHeat  = turbineTrip ? 0.0 : turbineValve * snapshot.powerFraction * 5.0
-        let condTarget = 305.0 + steamHeat / 0.8
-        condTempK = condTarget + (condTempK - condTarget) * exp(-0.8 * dt)
+        let condTarget = stationACPowered ? 305.0 + steamHeat / 0.8 : 368.0
+        let condRate   = stationACPowered ? 0.8 : 0.05
+        condTempK = condTarget + (condTempK - condTarget) * exp(-condRate * dt)
         condTempK = max(300.0, min(370.0, condTempK))
 
-        // Feedwater balance (fault or turbine trip stops feedwater).
-        // In = valve·0.10, out = power·0.07 → balances at valve 0.70 for 100%
-        // power, matching the default valve position (no spurious LOW_FEED).
-        let fwIn  = (feedwaterFault || turbineTrip) ? 0.0 : feedwaterValve * 0.10 * dt
+        // Feedwater balance. Main FW pumps are station-AC loads; when they die
+        // the TURBINE-DRIVEN aux-feed pump carries decay-heat feed as long as
+        // the SG can supply steam (works even in a blackout — that's its job),
+        // helped by the motor AFW pump once the diesels are up.
+        let fwPowered = stationACPowered && !feedwaterFault && !turbineTrip
+        var fwIn = fwPowered ? feedwaterValve * 0.10 * dt : 0.0
+        let sgSteaming = snapshot.steamPressureMPa > 0.8
+        afwRunning = !fwPowered && !feedwaterFault && sgSteaming && feedwaterInv < 0.6
+        if afwRunning {
+            fwIn += 0.030 * dt                                   // TD-AFW
+            if dieselsRunning || stationACPowered { fwIn += 0.015 * dt }   // motor AFW
+        }
+        // SGTR: ruptured tubes feed PRIMARY water into the SG — the level
+        // rises without feedwater (the classic identification cue).
+        fwIn += sgtrLeakKgs * 4e-4 * dt
         let fwOut = max(0, snapshot.powerFraction) * 0.07 * dt
         feedwaterInv = max(0, min(1.2, feedwaterInv + fwIn - fwOut))
 
@@ -439,7 +591,11 @@ final class PlantSupervisor {
                 : nomP + (dT > 0 ? dT * 0.05 : dT * 0.01)
             let pRate = pzrAutoEnabled ? 0.05 : 0.02
             pressureMPa = pTarget + (pressureMPa - pTarget) * exp(-pRate * dt)
-            pressureMPa = max(10.0, min(17.5, pressureMPa))
+            // Inventory-loss malfunctions bleed pressure faster than the PZR
+            // heaters can hold; safety injection fights back once actuated.
+            pressureMPa -= (primaryLeakKgs * 4e-4 + sgtrLeakKgs * 3e-4) * dt
+            if eccsActuated { pressureMPa += 0.004 * dt }
+            pressureMPa = max(6.0, min(17.5, pressureMPa))
         } else {
             // BWR steam dome: pressure rises with stored steam, turbine relieves it.
             let pTarget = nomP + (steamInv - 1.0) * 1.5
@@ -456,13 +612,19 @@ final class PlantSupervisor {
     }
 
     private func updateBoron(dt: Double) {
+        // Rod-malfunction reactivity rides on the external term with boron:
+        // a dropped RCCA is ≈ −350 pcm sitting on the bottom of the core.
+        let malfRho = droppedRod ? -350e-5 : 0
         // BWRs have no soluble-boron chemical shim in normal operation.
-        guard plant.params.hasBoron else { return }
+        guard plant.params.hasBoron else {
+            plant.params.externalReactivity = malfRho
+            return
+        }
         let vPrimary = 300.0   // m³ approximate primary coolant volume
         let dB = (borationRate * 150.0 - dilutionRate * boronPPM) / vPrimary * dt
         boronPPM = max(0, boronPPM + dB)
         // Reactivity: −8 pcm/ppm, nominal 800 ppm → 0 reactivity
-        plant.params.externalReactivity = -8e-5 * (boronPPM - 800.0)
+        plant.params.externalReactivity = -8e-5 * (boronPPM - 800.0) + malfRho
     }
 
     // MARK: — Alarms
@@ -508,8 +670,35 @@ final class PlantSupervisor {
         _check("P_RATE",  abs(_rate.dP) > 0.05, 2, "PZR PRESSURE HIGH RATE",        isTrip: false)
         _check("PW_RATE", _rate.dPw > 1.5,       2, "REACTOR POWER HIGH RATE",       isTrip: false)
 
-        // Auto-trip on any unacknowledged trip
-        if _alarmMap.values.contains(where: { $0.isTrip }) {
+        // LOOP / SBO ladder. Low RCS flow at power is a REACTOR TRIP (RCP bus
+        // undervoltage / low-flow trip — this is what actually scrams the
+        // plant when the grid goes away at power).
+        _check("LOW_FLOW", !plant.params.naturalCirculation && omegaRCP < 0.85 && s.powerFraction > 0.3,
+               1, "LOW RCS FLOW — TRIP", isTrip: true)
+        _check("LOOP",     !(line1BreakerOpen == false || line2BreakerOpen == false),
+               2, "LOSS OF OFFSITE POWER", isTrip: false)
+        _check("DG_RUN",   dieselsRunning,      3, "DIESEL GENERATORS RUNNING",     isTrip: false)
+        _check("SBO",      auxPower == .sbo && dieselTimer > 12, 1, "STATION BLACKOUT", isTrip: false)
+        _check("SRV_LIFT", srvOpen,             2, "SG SAFETY VALVES LIFTING",      isTrip: false)
+        _check("AFW_RUN",  afwRunning,          3, "AUX FEEDWATER RUNNING",         isTrip: false)
+        _check("BATT_LOW", batteryMin < 30 && auxPower == .sbo, 1, "STATION BATTERIES LOW", isTrip: false)
+
+        // Containment.
+        _check("CTMT_HI",   containment.pressureKPa > 115, 2, "CONTAINMENT PRESSURE HIGH",              isTrip: false)
+        _check("CTMT_HIHI", containment.pressureKPa > 135, 1, "CTMT PRESS HI-HI — SPRAY ACTUATED",      isTrip: false)
+        _check("CTMT_SUMP", containment.sumpM3 > 20,       2, "CONTAINMENT SUMP LEVEL HIGH",            isTrip: false)
+
+        // Malfunction windows.
+        _check("SGTR_RAD",  sgtrLeakKgs > 0,   1, "AIR EJECTOR RADIATION HIGH — SGTR", isTrip: false)
+        _check("ROD_DROP",  droppedRod,        1, "CONTROL ROD DROP",                  isTrip: false)
+        _check("ROD_DEV",   stuckRod,          2, "ROD POSITION DEVIATION",            isTrip: false)
+        _check("MSIV_CLSD", msivClosed,        1, "MAIN STEAM ISOLATION",              isTrip: false)
+        _check("ATWS",      atwsFault && _alarmMap.values.contains(where: { $0.isTrip }) && !scrammed,
+               1, "RPS FAILURE TO SCRAM — ATWS", isTrip: false)
+
+        // Auto-trip on any unacknowledged trip — unless the RPS itself has
+        // failed (the ATWS malfunction): then the board demands boration.
+        if !atwsFault, _alarmMap.values.contains(where: { $0.isTrip }) {
             scrammed = true
         }
 

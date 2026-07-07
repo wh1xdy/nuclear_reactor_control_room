@@ -140,6 +140,30 @@ struct MimicDiagram: View {
         }
 
         // ════════════════════════════════════════════════════════════════════
+        // CONTAINMENT (background layer — everything primary lives inside it)
+        // ════════════════════════════════════════════════════════════════════
+        if kind == .pwr {
+            var cv = Path()
+            cv.move(to: P(0.030, 0.985))
+            cv.addLine(to: P(0.030, 0.32))
+            cv.addQuadCurve(to: P(0.365, 0.32), control: P(0.1975, -0.28))
+            cv.addLine(to: P(0.365, 0.985))
+            ctx.stroke(cv, with: .color(Theme.ink.opacity(0.16)), lineWidth: 1)
+            let ctmtAlarm = sup.containment.pressureKPa > 115
+            txt(ctx, "CTMT", P(0.370, 0.105), .leading, Theme.textDim, 8)
+            reading(ctx, P(0.370, 0.128), String(format: "%.0f kPa", sup.containment.pressureKPa),
+                    ctmtAlarm ? Theme.alarm : Theme.textDim, 9, .leading)
+            txt(ctx, String(format: "%.0f K", sup.containment.tempK), P(0.370, 0.150), .leading, Theme.textDim, 8)
+            if sup.containment.sumpM3 > 0.5 {
+                txt(ctx, String(format: "SUMP %.0f m³", sup.containment.sumpM3), P(0.370, 0.172), .leading,
+                    sup.containment.sumpM3 > 20 ? Theme.caution : Theme.textDim, 8)
+            }
+            if sup.containment.sprayOn {
+                txt(ctx, "● SPRAY", P(0.370, 0.194), .leading, Theme.isFlat ? Theme.textHdr : Theme.statusNormal, 8)
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════════════
         // PIPING  (drawn first so equipment sits on top)
         // ════════════════════════════════════════════════════════════════════
         // Pipe color = the medium it carries / its own temperature. The hot leg
@@ -536,7 +560,21 @@ struct MimicDiagram: View {
         // Real reactive power from the excitation/AVR model (not a pf guess).
         tagRow(ctx, r, y, "MVAr", String(format: "%.0f", sup.turbineGen.mvar), gcol); y += 13
         let hzCol = synced ? (Theme.isFlat ? Theme.ink : Theme.statusNormal) : Theme.deEnergized
-        tagRow(ctx, r, y, "GRID Hz", synced ? "50.00" : "--.--", hzCol); y += 11
+        tagRow(ctx, r, y, "GRID Hz", synced ? "50.00" : "--.--", hzCol); y += 13
+        // Aux-power ladder: which buses feed the plant right now.
+        let auxTxt: String
+        let auxCol: Color
+        switch sup.auxPower {
+        case .grid:      auxTxt = "GRID";       auxCol = Theme.textDim
+        case .houseLoad: auxTxt = "HOUSE LOAD"; auxCol = Theme.caution
+        case .diesel:    auxTxt = "DIESELS";    auxCol = Theme.caution
+        case .sbo:
+            auxTxt = sup.dieselTimer < 10 && !sup.dieselFault
+                ? String(format: "DG START %.0fs", 10 - sup.dieselTimer)
+                : String(format: "BATT %.0f min", sup.batteryMin)
+            auxCol = Theme.alarm
+        }
+        tagRow(ctx, r, y, "AUX PWR", auxTxt, auxCol); y += 11
         ctx.draw(Text(String(format: "%.2f pf · δ %.0f°", sup.turbineGen.powerFactor, sup.turbineGen.loadAngleDeg))
                     .font(.system(size: 6, design: .monospaced)).foregroundColor(Theme.textDim),
                  at: CGPoint(x: r.minX + 8, y: y), anchor: .leading)
@@ -1274,6 +1312,16 @@ struct MimicDiagram: View {
                     .foregroundColor(fuelAlarm ? Theme.alarm : Theme.textHdr),
                  at: CGPoint(x: v.midX, y: v.minY + 10), anchor: .top)
 
+        // Drywell outline around vessel + recirc, with the containment reads.
+        let dw = CGRect(x: v.minX - fx(0.016), y: v.minY - fy(0.045),
+                        width: (loopX - v.minX) + fx(0.036), height: v.height + fy(0.135))
+        ctx.stroke(Path(roundedRect: dw, cornerRadius: fx(0.02), style: .continuous),
+                   with: .color(Theme.ink.opacity(0.16)), lineWidth: 1)
+        txt(ctx, "DRYWELL", CGPoint(x: dw.minX + 5, y: dw.minY + 8), .leading, Theme.textDim, 7)
+        reading(ctx, CGPoint(x: dw.maxX - 5, y: dw.minY + 8),
+                String(format: "%.0f kPa", sup.containment.pressureKPa),
+                sup.containment.pressureKPa > 115 ? Theme.alarm : Theme.textDim, 8, .trailing)
+
         // Recirc pump + tags.
         pump(ctx, pumpC, r: fy(0.022), running: flowF > 0.1,
              tint: sup.pumpDegraded ? Theme.alarm : Theme.accent, mirrored: true)
@@ -1309,6 +1357,9 @@ struct MimicDiagram: View {
         ctx.stroke(Path(roundedRect: cont, cornerRadius: cont.width * 0.35, style: .continuous),
                    with: .color(Theme.ink.opacity(0.18)), lineWidth: 1)
         txt(ctx, "CNV", CGPoint(x: cont.minX + 4, y: cont.minY + 8), .leading, Theme.textDim, 7)
+        reading(ctx, CGPoint(x: cont.maxX - 4, y: cont.minY + 8),
+                String(format: "%.0f kPa", sup.containment.pressureKPa),
+                sup.containment.pressureKPa > 115 ? Theme.alarm : Theme.textDim, 8, .trailing)
 
         // Integral vessel shell.
         let domeH = v.width * 0.40
