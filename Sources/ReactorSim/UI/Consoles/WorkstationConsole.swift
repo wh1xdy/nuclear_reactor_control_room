@@ -98,10 +98,14 @@ private struct TrendGroupPane: View {
                               yLo: 400, yHi: 650, color: Theme.accent, label: "T-AVG K")
                 }
                 HStack(spacing: 6) {
+                    // Pressure trend: label + axis follow the kind (BWR dome ≈ 7 MPa vs PWR/SMR 15.5).
                     TrendView(values: supervisor.orderedHistory(supervisor.histPress),
-                              yLo: 13, yHi: 17, color: Theme.accent, label: "PZR P MPa")
+                              yLo: supervisor.nominalPressureMPa - 2.5, yHi: supervisor.nominalPressureMPa + 1.5,
+                              color: Theme.accent,
+                              label: supervisor.hasPressurizer ? "PZR P MPa" : "DOME P MPa")
+                    // Electric axis scales from the kind's nominal so an SMR isn't a flatline.
                     TrendView(values: supervisor.orderedHistory(supervisor.histElec),
-                              yLo: 0, yHi: 1100, color: Theme.accent, label: "GROSS MWe")
+                              yLo: 0, yHi: supervisor.nominalMWe * 1.1, color: Theme.accent, label: "GROSS MWe")
                 }
             }
             .padding(10)
@@ -123,13 +127,25 @@ private struct FaceplatePane: View {
                           out: "\(Int((228 * (1 - supervisor.rodPosition)).rounded())) SWD") {
                     supervisor.rodAutoEnabled.toggle()
                 }
-                faceplate("PRESSURIZER", auto: supervisor.pzrAutoEnabled,
-                          sp: "15.50 MPa", pv: String(format: "%.2f MPa", supervisor.pressureMPa),
-                          out: supervisor.pressureMPa < 15.5 ? "HEATERS" : "SPRAY") {
-                    supervisor.pzrAutoEnabled.toggle()
+                // PWR/SMR have a controllable pressurizer; a BWR holds dome pressure with
+                // no PZR controller, so show a read-only STEAM DOME faceplate instead.
+                if supervisor.hasPressurizer {
+                    faceplate("PRESSURIZER", auto: supervisor.pzrAutoEnabled,
+                              sp: String(format: "%.2f MPa", supervisor.nominalPressureMPa),
+                              pv: String(format: "%.2f MPa", supervisor.pressureMPa),
+                              out: supervisor.pressureMPa < supervisor.nominalPressureMPa ? "HEATERS" : "SPRAY") {
+                        supervisor.pzrAutoEnabled.toggle()
+                    }
+                } else {
+                    faceplate("STEAM DOME", auto: false,
+                              sp: String(format: "%.2f MPa", supervisor.nominalPressureMPa),
+                              pv: String(format: "%.2f MPa", supervisor.pressureMPa),
+                              out: supervisor.porvOpen ? "SRV OPEN" : "TURB RELIEF",
+                              showAuto: false) { }
                 }
                 faceplate("FEEDWATER", auto: supervisor.fwAutoEnabled,
-                          sp: "SG LEVEL", pv: String(format: "%.3f", supervisor.feedwaterInv),
+                          sp: supervisor.hasSteamGenerator ? "SG LEVEL" : "RPV LVL",
+                          pv: String(format: "%.3f", supervisor.feedwaterInv),
                           out: String(format: "%.0f%% VLV", supervisor.feedwaterValve * 100)) {
                     supervisor.fwAutoEnabled.toggle()
                 }
@@ -141,6 +157,7 @@ private struct FaceplatePane: View {
     }
 
     private func faceplate(_ name: String, auto: Bool, sp: String, pv: String, out: String,
+                           showAuto: Bool = true,
                            toggle: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
@@ -150,15 +167,18 @@ private struct FaceplatePane: View {
                 }
             }
             Spacer()
-            Button(action: toggle) {
-                Text(auto ? "AUTO" : "MAN")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(auto ? Theme.ink : Theme.textDim)
-                    .frame(width: 56).padding(.vertical, 8)
-                    .contentShape(Rectangle())
+            // No AUTO/MAN toggle for read-only faceplates (e.g. BWR steam dome — no PZR controller).
+            if showAuto {
+                Button(action: toggle) {
+                    Text(auto ? "AUTO" : "MAN")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(auto ? Theme.ink : Theme.textDim)
+                        .frame(width: 56).padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .controlSurface(tint: auto ? Theme.accent : nil)
             }
-            .buttonStyle(.plain)
-            .controlSurface(tint: auto ? Theme.accent : nil)
         }
         .padding(10)
         .background(Theme.ink.opacity(0.04))

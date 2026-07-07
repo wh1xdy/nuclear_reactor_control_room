@@ -39,16 +39,19 @@ private struct AnnunciatorWall: View {
             st("RX_TRIP", "REACTOR\nTRIP", supervisor.scrammed, trip: true),
             w("HIGH_FLUX", "HI NEUTRON\nFLUX", trip: true),
             w("HIGH_FUEL_T", "HI FUEL\nTEMP", trip: true),
-            w("HIGH_PRESS", "HI RCS\nPRESS", trip: true),
-            w("HIGH_COOL_T", "HI RCS\nT-AVG", trip: true),
+            w("HIGH_PRESS", supervisor.hasPressurizer ? "HI RCS\nPRESS" : "HI DOME\nPRESS", trip: true),
+            w("HIGH_COOL_T", supervisor.reactorKind == .bwr ? "HI COOL\nTEMP" : "HI RCS\nT-AVG", trip: true),
             w("ECCS_ACT", "ECCS\nACTUATION", trip: true),
-            w("PORV_OPEN", "PZR PORV\nOPEN", trip: false),
-            w("WARN_PRESS", "PZR PRESS\nHI", trip: false),
-            w("LOW_FEED", "LO FW\nINVENTORY", trip: false),
+            w("PORV_OPEN", supervisor.hasPressurizer ? "PZR PORV\nOPEN" : "SRV\nOPEN", trip: false),
+            w("WARN_PRESS", supervisor.hasPressurizer ? "PZR PRESS\nHI" : "DOME PRESS\nHI", trip: false),
+            w("LOW_FEED", supervisor.hasSteamGenerator ? "LO FW\nINVENTORY" : "LO RPV\nLVL", trip: false),
             w("XE_TRANSIENT", "XENON\nTRANSIENT", trip: false),
             st("TBN_TRIP", "TURBINE\nTRIP", supervisor.turbineTrip, trip: false),
             st("STM_DUMP", "STEAM DUMP\nOPEN", supervisor.steamDumpValve > 0.001, trip: false),
-            st("RCP_DEG", "RCP\nDEGRADED", supervisor.pumpDegraded, trip: false),
+            st("RCP_DEG",
+               supervisor.isNaturalCirc ? "SPARE"
+                 : (supervisor.reactorKind == .bwr ? "RECIRC PMP\nDEGRADED" : "RCP\nDEGRADED"),
+               supervisor.isNaturalCirc ? false : supervisor.pumpDegraded, trip: false),
             st("FW_FAULT", "FEEDWATER\nFAULT", supervisor.feedwaterFault, trip: false),
             st("SPARE", "SPARE", false, trip: false),
         ]
@@ -87,9 +90,14 @@ private struct GaugeBay: View {
             PanelHeader(title: "PROCESS GAUGES")
             HStack(spacing: 6) {
                 gauge("RX POWER", ArcGaugeView(value: s.powerFraction * 100, lo: 0, hi: 130, label: "", unit: "%", tripHi: 120))
-                gauge("PZR PRESS", ArcGaugeView(value: supervisor.pressureMPa, lo: 0, hi: 18, label: "", unit: "MPa", tripHi: 17))
-                gauge("RCS T-AVG", ArcGaugeView(value: s.coolantTempK, lo: 500, hi: 600, label: "", unit: "K", tripHi: 593))
-                gauge("GROSS", ArcGaugeView(value: s.electricPowerW / 1e6, lo: 0, hi: 1100, label: "", unit: "MWe", tripHi: nil))
+                // Pressure gauge label/scale/trip follow the kind (BWR dome ~7 MPa vs PWR/SMR).
+                // +1.5 matches the supervisor's HIGH_PRESS setpoint pTrip = nomP + 1.5.
+                gauge(supervisor.hasPressurizer ? "PZR PRESS" : "DOME PRESS",
+                      ArcGaugeView(value: supervisor.pressureMPa, lo: 0, hi: supervisor.nominalPressureMPa + 2.5,
+                                   label: "", unit: "MPa", tripHi: supervisor.nominalPressureMPa + 1.5))
+                gauge(supervisor.reactorKind == .bwr ? "COOLANT T" : "RCS T-AVG",
+                      ArcGaugeView(value: s.coolantTempK, lo: 500, hi: 600, label: "", unit: "K", tripHi: 593))
+                gauge("GROSS", ArcGaugeView(value: s.electricPowerW / 1e6, lo: 0, hi: supervisor.nominalMWe * 1.1, label: "", unit: "MWe", tripHi: nil))
             }
             .padding(12)
             .frame(maxHeight: .infinity)
@@ -119,9 +127,12 @@ private struct RecorderBay: View {
                 TrendView(values: supervisor.orderedHistory(supervisor.histPower),
                           yLo: 0, yHi: 130, color: Theme.accent, label: "RX PWR %").frame(maxHeight: .infinity)
                 TrendView(values: supervisor.orderedHistory(supervisor.histCoolT),
-                          yLo: 400, yHi: 650, color: Theme.accent, label: "T-AVG K").frame(maxHeight: .infinity)
+                          yLo: 400, yHi: 650, color: Theme.accent,
+                          label: supervisor.reactorKind == .bwr ? "COOL T K" : "T-AVG K").frame(maxHeight: .infinity)
                 TrendView(values: supervisor.orderedHistory(supervisor.histPress),
-                          yLo: 13, yHi: 17, color: Theme.accent, label: "PZR P MPa").frame(maxHeight: .infinity)
+                          yLo: supervisor.nominalPressureMPa - 2.5, yHi: supervisor.nominalPressureMPa + 1.5,
+                          color: Theme.accent,
+                          label: supervisor.hasPressurizer ? "PZR P MPa" : "DOME P MPa").frame(maxHeight: .infinity)
             }
             .padding(10)
         }
@@ -136,8 +147,16 @@ private struct SwitchDeck: View {
         HStack(alignment: .top, spacing: 14) {
             fader("ROD", Binding(get: { supervisor.rodPosition },
                                  set: { supervisor.rodPosition = $0; supervisor.rodAutoEnabled = false }),
-                  { "\(Int((228 * (1 - $0)).rounded())) SWD" })
-            fader("FLOW", Binding(get: { supervisor.primaryFlow }, set: { supervisor.primaryFlow = $0 }), { "\(Int($0*100))%" })
+                  { supervisor.reactorKind == .pwr ? "\(Int((228 * (1 - $0)).rounded())) SWD"
+                      : (supervisor.reactorKind == .bwr ? "NOTCH \(Int((48 * (1 - $0)).rounded()))"
+                         : "\(Int((1 - $0) * 100))% WD") })
+            // No primary-flow lever on a natural-circulation SMR; a BWR's lever is recirc pumps.
+            if !supervisor.isNaturalCirc {
+                fader(supervisor.reactorKind == .bwr ? "RECIRC" : "FLOW",
+                      Binding(get: { supervisor.primaryFlow }, set: { supervisor.primaryFlow = $0 }), { "\(Int($0*100))%" })
+            } else {
+                Spacer()
+            }
             fader("TBN", Binding(get: { supervisor.turbineValve }, set: { supervisor.turbineValve = $0 }), { "\(Int($0*100))%" })
             fader("FW", Binding(get: { supervisor.feedwaterValve },
                                 set: { supervisor.feedwaterValve = $0; supervisor.fwAutoEnabled = false }),
@@ -150,7 +169,10 @@ private struct SwitchDeck: View {
                     handSwitch("FW AUTO", on: supervisor.fwAutoEnabled) { supervisor.fwAutoEnabled.toggle() }
                 }
                 HStack(spacing: 6) {
-                    handSwitch("PZR AUTO", on: supervisor.pzrAutoEnabled) { supervisor.pzrAutoEnabled.toggle() }
+                    // No pressurizer controller on a BWR — pzrAutoEnabled is a no-op there.
+                    if supervisor.hasPressurizer {
+                        handSwitch("PZR AUTO", on: supervisor.pzrAutoEnabled) { supervisor.pzrAutoEnabled.toggle() }
+                    }
                     handSwitch("STARTUP", on: supervisor.autoStartup) { supervisor.autoStartup.toggle() }
                 }
             }

@@ -46,6 +46,13 @@ struct MimicDiagram: View {
         else if hypot(p.x - l1.x,  p.y - l1.y)  < hitR { supervisor.toggleLineBreaker(0); return }
         else if hypot(p.x - l2.x,  p.y - l2.y)  < hitR { supervisor.toggleLineBreaker(1); return }
 
+        // Tapping the NEUTRONICS dock opens the startup-physics panel
+        // (1/M · ECP · rod worth) — same idiom as the core map on the vessel.
+        if CGRect(x: 0.012 * w, y: 0.045 * h, width: 0.140 * w, height: 0.205 * h).contains(p) {
+            supervisor.startupPanelOpen = true
+            return
+        }
+
         // Tapping the reactor vessel opens the core map popup. Regions track
         // the per-kind vessel frames in draw().
         let vesselHit: CGRect
@@ -619,15 +626,26 @@ struct MimicDiagram: View {
         dockField(ctx, r, "RCS PRIMARY")
         let flowF = snap.scrammed ? 0 : max(0, Double(sup.primaryFlow) * sup.omegaRCP)
         let subcool = tsatK(sup.pressureMPa) - snap.hotLegTempK     // margin to saturation
-        let pitch = max(14, (r.height - 32) / 4)                    // 5 rows / 4 gaps, derived from height
-        var y = r.minY + 24
+        let pitch = max(12, (r.height - 32) / 6)                    // 7 rows / 6 gaps
+        var y = r.minY + 22
         tagRow(ctx, r, y, "RCS FLOW", String(format: "%.0f kg/s", 18_800 * flowF), Theme.ink); y += pitch
-        tagRow(ctx, r, y, "RCP-1 ΔP", String(format: "%.2f MPa", 0.62 * sup.omegaRCP * sup.omegaRCP), Theme.ink); y += pitch
-        tagRow(ctx, r, y, "RCP-1 AMPS", String(format: "%.0f A", 6_000 * sup.omegaRCP), Theme.ink); y += pitch
         tagRow(ctx, r, y, "SUBCOOL", String(format: "%.0f K", subcool),
                subcool < 15 ? Theme.alarm : subcool < 30 ? Theme.caution : Theme.statusNormal); y += pitch
-        tagRow(ctx, r, y, "RC PUMPS", sup.pumpDegraded ? "DEGRADED" : "1 / 1 RUN",
-               sup.pumpDegraded ? Theme.alarm : Theme.textDim)
+        // Per-loop rows: pump speed + status (the single-pump-loss cue).
+        let running = sup.rcpRunning
+        let n = sup.rcpCount
+        for i in 0..<n {
+            let w = sup.rcpOmega[i]
+            let st = w > 0.95 ? "RUN" : (w > 0.10 ? "COAST" : "OFF")
+            let c: Color = w > 0.95 ? Theme.textDim : (w > 0.10 ? Theme.caution : Theme.alarm)
+            tagRow(ctx, r, y, "RCP-\(i + 1)",
+                   String(format: "%3.0f%%  %.2f MPa  %@", w * 100, 0.62 * w * w, st),
+                   running[i] ? c : Theme.alarm)
+            y += pitch
+        }
+        let runCount = (0..<n).filter { sup.rcpOmega[$0] > 0.95 }.count
+        tagRow(ctx, r, y, "RC PUMPS", sup.pumpDegraded ? "DEGRADED" : "\(runCount) / \(n) RUN",
+               sup.pumpDegraded || runCount < n ? Theme.alarm : Theme.textDim)
     }
 
     /// Centre dock: the secondary thermodynamic picture, sited in the steam path.

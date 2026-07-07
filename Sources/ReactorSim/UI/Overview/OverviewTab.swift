@@ -31,7 +31,7 @@ private struct PIDPanel: View {
     let supervisor: PlantSupervisor
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: "PLANT OVERVIEW — PWR")
+            PanelHeader(title: "PLANT OVERVIEW — \(supervisor.reactorKind.rawValue.uppercased())")
             PIDCanvas(supervisor: supervisor)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(8)
@@ -69,19 +69,31 @@ private struct StatusReadoutsPanel: View {
                 statusRow("RCS T-HOT",    snap.hotLegTempK.fmt("%6.1f"), "K",
                           snap.hotLegTempK > 600 ? Theme.caution : Theme.text)
                 statusRow("RCS T-COLD",   snap.coldLegTempK.fmt("%6.1f"), "K", Theme.text)
-                statusRow("SG TEMP",      snap.sgTempK.fmt("%6.1f"), "K", Theme.text)
+                statusRow(supervisor.hasSteamGenerator ? "SG TEMP" : "DOME TEMP",
+                          snap.sgTempK.fmt("%6.1f"), "K", Theme.text)
                 statusRow("STM PRESS",    snap.steamPressureMPa.fmt("%6.3f"), "MPa", Theme.text)
                 Divider().background(Theme.sep)
-                statusRow("PZR PRESS",    supervisor.pressureMPa.fmt("%6.3f"), "MPa",
-                          supervisor.pressureMPa > 17.0 ? Theme.alarm : supervisor.pressureMPa > 16.3 ? Theme.caution : Theme.text)
-                statusRow("RCS BORON",    supervisor.boronPPM.fmt("%6.1f"), "ppm",
-                          supervisor.boronPPM < 100 ? Theme.caution : Theme.text)
+                statusRow(supervisor.hasPressurizer ? "PZR PRESS" : "DOME PRESS",
+                          supervisor.pressureMPa.fmt("%6.3f"), "MPa",
+                          supervisor.pressureMPa > supervisor.nominalPressureMPa * 1.097 ? Theme.alarm
+                            : supervisor.pressureMPa > supervisor.nominalPressureMPa * 1.05 ? Theme.caution : Theme.text)
+                // Soluble boron exists only on PWR/SMR.
+                if supervisor.hasBoron {
+                    statusRow("RCS BORON",    supervisor.boronPPM.fmt("%6.1f"), "ppm",
+                              supervisor.boronPPM < 100 ? Theme.caution : Theme.text)
+                }
                 statusRow("DECAY HEAT",   (snap.decayHeatFraction*100).fmt("%6.2f"), "%",
                           snap.decayHeatFraction > 0.03 ? Theme.caution : Theme.text)
                 Divider().background(Theme.sep)
-                statusRow("RCP SPEED",    (supervisor.omegaRCP*100).fmt("%6.1f"), "%",
-                          supervisor.omegaRCP < 0.87 ? Theme.caution : Theme.text)
-                statusRow("RCS FLOW",     (supervisor.primaryFlow*supervisor.omegaRCP*100).fmt("%6.1f"), "%", Theme.text)
+                // No coolant pumps on a natural-circulation SMR.
+                if !supervisor.isNaturalCirc {
+                    statusRow(supervisor.reactorKind == .bwr ? "RECIRC SPEED" : "RCP SPEED",
+                              (supervisor.omegaRCP*100).fmt("%6.1f"), "%",
+                              supervisor.omegaRCP < 0.87 ? Theme.caution : Theme.text)
+                }
+                statusRow(supervisor.reactorKind == .bwr ? "RECIRC FLOW"
+                            : supervisor.isNaturalCirc ? "NAT CIRC FLOW" : "RCS FLOW",
+                          (supervisor.primaryFlow*supervisor.omegaRCP*100).fmt("%6.1f"), "%", Theme.text)
                 statusRow("FW INV",       supervisor.feedwaterInv.fmt("%6.3f"), "rel",
                           supervisor.feedwaterInv < 0.1 ? Theme.alarm : Theme.text)
                 statusRow("STEAM INV",    supervisor.steamInv.fmt("%6.3f"), "rel",
@@ -141,8 +153,9 @@ private struct InstrumentPanel: View {
 
                 // Bar meters
                 HStack(alignment: .top, spacing: 8) {
-                    BarMeterView(value: supervisor.pressureMPa, lo: 0, hi: 18,
-                                 label: "PZR PRESS", unit: "MPa", tripHi: 17.0, warnHi: 16.3)
+                    BarMeterView(value: supervisor.pressureMPa, lo: 0, hi: supervisor.nominalPressureMPa * 1.16,
+                                 label: supervisor.hasPressurizer ? "PZR PRESS" : "DOME PRESS", unit: "MPa",
+                                 tripHi: supervisor.nominalPressureMPa * 1.097, warnHi: supervisor.nominalPressureMPa * 1.05)
                     BarMeterView(value: snap.fuelTempK, lo: 300, hi: 1800,
                                  label: "T-FUEL", unit: "K",   tripHi: 1500, warnHi: 1400)
                     BarMeterView(value: snap.coolantTempK, lo: 300, hi: 700,

@@ -36,14 +36,18 @@ struct AlarmsTab: View {
             win("HIGH_COOL_T", "HI RCS\nT-AVG",      trip: true),
 
             win("ECCS_ACT",    "ECCS\nACTUATION",    trip: true),
-            win("PORV_OPEN",   "PZR PORV\nOPEN",     trip: false),
-            win("WARN_PRESS",  "PZR PRESS\nHI WARN", trip: false),
+            win("PORV_OPEN",   supervisor.hasPressurizer ? "PZR PORV\nOPEN" : "SRV\nOPEN", trip: false),
+            win("WARN_PRESS",  supervisor.hasPressurizer ? "PZR PRESS\nHI WARN" : "DOME PRESS\nHI WARN", trip: false),
             win("LOW_FEED",    "LO FW\nINVENTORY",   trip: false),
             win("XE_TRANSIENT","XENON\nTRANSIENT",   trip: false),
 
             state("TBN_TRIP",  "TURBINE\nTRIP",      supervisor.turbineTrip, trip: false),
             state("STM_DUMP",  "STEAM DUMP\nOPEN",   supervisor.steamDumpValve > 0.001, trip: false),
-            state("RCP_DEG",   "RCP\nDEGRADED",      supervisor.pumpDegraded, trip: false),
+            // No coolant pumps on a natural-circulation SMR; a BWR runs recirc pumps.
+            supervisor.isNaturalCirc
+                ? state("SPARE_2",  "SPARE", false, trip: false)
+                : state("RCP_DEG",  supervisor.reactorKind == .bwr ? "RECIRC\nDEGRADED" : "RCP\nDEGRADED",
+                        supervisor.pumpDegraded, trip: false),
             state("FW_FAULT",  "FEEDWATER\nFAULT",   supervisor.feedwaterFault, trip: false),
             state("SPARE_1",   "SPARE",              false, trip: false),
         ]

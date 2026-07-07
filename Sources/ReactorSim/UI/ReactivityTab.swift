@@ -42,16 +42,20 @@ private struct ReactivityBudgetPanel: View {
 
         // Restrained palette: total in accent, components in neutral grey.
         let grey = Theme.ink.opacity(0.55)
-        let components: [(String, Double, Color)] = [
-            ("Total",          rhoTot,  Theme.accent),
-            ("Rod position",   rhoRods, grey),
-            ("Doppler (fuel)", rhoFuel, grey),
-            ("Moderator",      rhoCool, grey),
-            ("Xenon-135",      rhoXe,   grey),
-            ("Boron",          rhoB,    grey),
-        ]
+        // Soluble boron is a PWR/SMR reactivity control; a BWR has none.
+        let components: [(String, Double, Color)] = {
+            var c: [(String, Double, Color)] = [
+                ("Total",          rhoTot,  Theme.accent),
+                ("Rod position",   rhoRods, grey),
+                ("Doppler (fuel)", rhoFuel, grey),
+                ("Moderator",      rhoCool, grey),
+                ("Xenon-135",      rhoXe,   grey),
+            ]
+            if supervisor.hasBoron { c.append(("Boron", rhoB, grey)) }
+            return c
+        }()
 
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             PanelHeader(title: "REACTIVITY BUDGET")
             // Fixed columns: label | bar field (zero-centered) | value.
             // Bars stay inside the field — they can never run under the text.
@@ -205,8 +209,11 @@ private struct ReactivityReadoutsPanel: View {
                 readRow("DECAY HEAT",    String(format: "%7.3f %%", s.decayHeatFraction * 100),
                         s.decayHeatFraction > 0.03 ? Theme.caution : Theme.text)
                 readRow("RODS D-BANK",   String(format: "%4d SWD", Int((228 * (1 - s.rodPosition)).rounded())), Theme.text)
-                readRow("RCS BORON",     String(format: "%7.1f ppm", supervisor.boronPPM),
-                        supervisor.boronPPM < 100 ? Theme.caution : Theme.text)
+                // Soluble boron exists only on PWR/SMR.
+                if supervisor.hasBoron {
+                    readRow("RCS BORON",     String(format: "%7.1f ppm", supervisor.boronPPM),
+                            supervisor.boronPPM < 100 ? Theme.caution : Theme.text)
+                }
             }
             .padding(Theme.panelPadding)
         }

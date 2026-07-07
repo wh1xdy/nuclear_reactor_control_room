@@ -12,8 +12,9 @@ struct ControlsPanel: View {
                 sectionLabel("CONTROLS")
 
                 // Guided mode coaches the operator; authentic assumes expertise.
+                // Drop the A/D flow hint when there's no flow control (natural-circ SMR).
                 if !Theme.isFlat {
-                    Text("Drag a fader to set a demand — or use the keys: W/S rods · A/D flow · Q/E turbine")
+                    Text("Drag a fader to set a demand — or use the keys: W/S rods\(supervisor.isNaturalCirc ? "" : " · A/D flow") · Q/E turbine")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Theme.textDim)
                         .fixedSize(horizontal: false, vertical: true)
@@ -28,10 +29,13 @@ struct ControlsPanel: View {
                               value: Binding(get: { supervisor.rodPosition },
                                             set: { supervisor.rodPosition = $0 }),
                               displayStr: { "\(Int((228 * (1 - $0)).rounded())) SWD" })
-                    DCSSlider(label: "RCS FLOW",
-                              value: Binding(get: { supervisor.primaryFlow },
-                                            set: { supervisor.primaryFlow = $0 }),
-                              displayStr: { "\(Int($0 * 100)) %" })
+                    // No coolant-flow control on a natural-circulation SMR; recirc flow on a BWR.
+                    if !supervisor.isNaturalCirc {
+                        DCSSlider(label: supervisor.reactorKind == .bwr ? "RECIRC FLOW" : "RCS FLOW",
+                                  value: Binding(get: { supervisor.primaryFlow },
+                                                set: { supervisor.primaryFlow = $0 }),
+                                  displayStr: { "\(Int($0 * 100)) %" })
+                    }
                     DCSSlider(label: "TBN GOV VALVE",
                               value: Binding(get: { supervisor.turbineValve },
                                             set: { supervisor.turbineValve = $0 }),
@@ -40,10 +44,13 @@ struct ControlsPanel: View {
                               value: Binding(get: { supervisor.feedwaterValve },
                                             set: { supervisor.feedwaterValve = $0 }),
                               displayStr: { "\(Int($0 * 100)) %" })
-                    DCSSlider(label: "BORATION RATE",
-                              value: Binding(get: { supervisor.borationRate },
-                                            set: { supervisor.borationRate = $0 }),
-                              displayStr: { "\(Int($0 * 100)) %" })
+                    // Soluble-boron reactivity control exists only on PWR/SMR.
+                    if supervisor.hasBoron {
+                        DCSSlider(label: "BORATION RATE",
+                                  value: Binding(get: { supervisor.borationRate },
+                                                set: { supervisor.borationRate = $0 }),
+                                  displayStr: { "\(Int($0 * 100)) %" })
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
@@ -73,10 +80,13 @@ struct ControlsPanel: View {
                                      statusColor: Theme.caution, keyHint: "T") {
                             supervisor.turbineTrip = !supervisor.turbineTrip
                         }
-                        ToggleButton(label: "PUMP DEGRADED",
-                                     state: supervisor.pumpDegraded,
-                                     statusColor: Theme.alarm, keyHint: "Z") {
-                            supervisor.pumpDegraded = !supervisor.pumpDegraded
+                        // No coolant pumps on a natural-circulation SMR.
+                        if !supervisor.isNaturalCirc {
+                            ToggleButton(label: supervisor.reactorKind == .bwr ? "RECIRC DEGRADED" : "PUMP DEGRADED",
+                                         state: supervisor.pumpDegraded,
+                                         statusColor: Theme.alarm, keyHint: "Z") {
+                                supervisor.pumpDegraded = !supervisor.pumpDegraded
+                            }
                         }
                         ToggleButton(label: "FEEDWATER FAULT",
                                      state: supervisor.feedwaterFault,

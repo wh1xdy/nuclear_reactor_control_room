@@ -39,11 +39,12 @@ struct SecondaryTab: View {
                           lo: Double, hi: Double, tripHi: Double?, warnHi: Double?)] {
         let s = supervisor.snapshot
         return [
-            ("SG TEMP",    "K",   s.sgTempK,           300, 700, 620, 600),
+            // BWR is direct-cycle with no steam generator — this reads dome temperature.
+            (supervisor.hasSteamGenerator ? "SG TEMP" : "DOME TEMP", "K", s.sgTempK, 300, 700, 620, 600),
             ("COND TEMP",  "K",   supervisor.condTempK, 280, 380, 340, 330),
             ("STEAM INV",  "rel", supervisor.steamInv,  0,   2.0, nil, nil),
             ("FW INV",     "rel", supervisor.feedwaterInv, 0, 1.2, nil, nil),
-            ("GROSS ELEC", "MWe", s.electricPowerW / 1e6, 0, 1200, nil, nil),
+            ("GROSS ELEC", "MWe", s.electricPowerW / 1e6, 0, supervisor.nominalMWe * 1.15, nil, nil),
             ("TBN GOV",    "%",   supervisor.turbineValve * 100, 0, 105, nil, nil),
         ]
     }
@@ -58,7 +59,8 @@ private struct SecondaryDCSGrid: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
                 DCSReadout(label: "THERMAL PWR",  value: String(format: "%6.1f MWt", s.thermalPowerW / 1e6), color: Theme.text)
                 DCSReadout(label: "GROSS ELEC",   value: String(format: "%6.1f MWe", s.electricPowerW / 1e6), color: Theme.text)
-                DCSReadout(label: "SG TEMP",      value: String(format: "%6.1f K", s.sgTempK),
+                DCSReadout(label: supervisor.hasSteamGenerator ? "SG TEMP" : "DOME TEMP",
+                           value: String(format: "%6.1f K", s.sgTempK),
                            color: s.sgTempK > 600 ? Theme.caution : Theme.text)
                 DCSReadout(label: "STEAM PRESS",  value: String(format: "%6.3f MPa", s.steamPressureMPa), color: Theme.text)
                 DCSReadout(label: "COND TEMP",    value: String(format: "%6.1f K", supervisor.condTempK),
@@ -124,9 +126,10 @@ private struct SecondaryTrends: View {
             PanelHeader(title: "SECONDARY TRENDS")
             VStack(spacing: 8) {
                 TrendView(values: supervisor.orderedHistory(supervisor.histElec),
-                          yLo: 0, yHi: 1100, color: Theme.accent, label: "GROSS ELEC MWe")
+                          yLo: 0, yHi: supervisor.nominalMWe * 1.1, color: Theme.accent, label: "GROSS ELEC MWe")
                 TrendView(values: supervisor.orderedHistory(supervisor.histSteamT),
-                          yLo: 400, yHi: 650, color: Theme.accent, label: "SG TEMP K")
+                          yLo: 400, yHi: 650, color: Theme.accent,
+                          label: supervisor.hasSteamGenerator ? "SG TEMP K" : "DOME TEMP K")
                 TrendView(values: supervisor.orderedHistory(supervisor.histDecay),
                           yLo: 0, yHi: 10, color: Theme.accent, label: "DECAY HEAT %")
             }
