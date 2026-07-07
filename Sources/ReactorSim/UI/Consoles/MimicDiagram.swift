@@ -832,8 +832,8 @@ struct MimicDiagram: View {
         do {
             let cCold = Theme.colorFor(snap.coldLegTempK, trip: 620)
             let cHot  = Theme.colorFor(snap.hotLegTempK,  trip: 620)
-            let core = CGRect(x: body.minX + body.width * 0.16, y: body.minY + body.height * 0.34,
-                              width: body.width * 0.68, height: body.height * 0.48)
+            let core = CGRect(x: body.minX + body.width * 0.10, y: body.minY + body.height * 0.13,
+                              width: body.width * 0.80, height: body.height * 0.66)
             var inner = ctx
             inner.clip(to: v)
             // Base: cold-leg water everywhere (downcomer + lower plenum + bottom head).
@@ -862,10 +862,11 @@ struct MimicDiagram: View {
             }, with: .color(Theme.ink.opacity(0.14)), lineWidth: 1)
         }
 
-        // Core region with glow + assembly lattice. Taller than before —
-        // active fuel dominates the vessel height on a real PWR.
-        let core = CGRect(x: body.minX + body.width * 0.16, y: body.minY + body.height * 0.34,
-                          width: body.width * 0.68, height: body.height * 0.48)
+        // Core region with glow + assembly lattice — the heatmap IS the module:
+        // it spans nearly the whole vessel interior, with slim margins for the
+        // downcomer annulus and the plena.
+        let core = CGRect(x: body.minX + body.width * 0.10, y: body.minY + body.height * 0.13,
+                          width: body.width * 0.80, height: body.height * 0.66)
         coreBands(ctx, core, snap: snap)
         fluxScale(ctx, x: body.minX - 26, core: core)
         if snap.powerFraction > 1.10 {
@@ -1318,9 +1319,10 @@ struct MimicDiagram: View {
             }, with: .color(Theme.ink.opacity(0.30)), lineWidth: 1.5)
         }
 
-        // Core with the live axial bands (bottom-peaked for a BWR — voids up top).
-        let core = CGRect(x: v.minX + v.width * 0.16, y: v.minY + v.height * 0.40,
-                          width: v.width * 0.68, height: v.height * 0.38)
+        // Core with the live axial bands (bottom-peaked for a BWR — voids up
+        // top). Fills the shell below the separators/level region.
+        let core = CGRect(x: v.minX + v.width * 0.12, y: v.minY + v.height * 0.36,
+                          width: v.width * 0.76, height: v.height * 0.44)
         coreBands(ctx, core, snap: snap)
         if snap.powerFraction > 1.10 {
             ctx.stroke(Path(core), with: .color(Theme.alarm.opacity(min(1, (snap.powerFraction - 1.10) / 0.10))), lineWidth: 2)
@@ -1449,9 +1451,10 @@ struct MimicDiagram: View {
             }, with: .color(Theme.ink.opacity(0.22)), lineWidth: 1)
         }
 
-        // Core with the live axial bands.
-        let core = CGRect(x: v.minX + v.width * 0.20, y: v.minY + v.height * 0.62,
-                          width: v.width * 0.60, height: v.height * 0.24)
+        // Core with the live axial bands (the integral internals — riser, coils,
+        // PZR head — own the upper vessel, so the core keeps the lower third).
+        let core = CGRect(x: v.minX + v.width * 0.16, y: v.minY + v.height * 0.60,
+                          width: v.width * 0.68, height: v.height * 0.28)
         coreBands(ctx, core, snap: snap)
         ctx.stroke(Path(core), with: .color(Theme.ink.opacity(0.20)), lineWidth: 1)
 
