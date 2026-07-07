@@ -19,6 +19,9 @@ struct MimicConsole: View {
             if supervisor.coreMapOpen {
                 CoreMapView(supervisor: supervisor)
             }
+            if supervisor.malfMenuOpen {
+                MalfunctionMenu(supervisor: supervisor)
+            }
         }
     }
 }
@@ -163,9 +166,9 @@ private struct MimicControlStrip: View {
                     chip("TBN TRIP", on: supervisor.turbineTrip, tint: Theme.caution) { supervisor.turbineTrip.toggle() }
                     chip("RESET [L]", on: false, tint: Theme.accent) { supervisor.resetScram() }
                 }
-                HStack(spacing: 5) {
-                    chip("RCP FLT", on: supervisor.pumpDegraded, tint: Theme.alarm) { supervisor.pumpDegraded.toggle() }
-                    chip("FW FLT", on: supervisor.feedwaterFault, tint: Theme.alarm) { supervisor.feedwaterFault.toggle() }
+                // Individual fault chips moved into the instructor panel.
+                chip("MALFUNCTIONS [I]", on: supervisor.anyMalfunctionActive, tint: Theme.alarm) {
+                    supervisor.malfMenuOpen.toggle()
                 }
             }
             .frame(width: 210)

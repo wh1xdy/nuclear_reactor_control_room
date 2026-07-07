@@ -68,6 +68,7 @@ final class SoundEngine: @unchecked Sendable {
     // ── Procedural-bed parameters (main writes, render reads) ───────────────
     private var humLevel: Double = 0
     private var humPitch: Double = 1
+    private var dieselMode: Int = 0        // 0 off · 1 cranking · 2 running
     private var chimeAt:  Double = -1
     private var clunkAt:  Double = -1        // procedural fallback only
     private var hornAt:   Double = -1
@@ -125,6 +126,20 @@ final class SoundEngine: @unchecked Sendable {
                     hum += 0.012 * sin(w * (f0 + 0.35))       // beat partner
                     hum += 0.007 * self.noise()                // breath
                     s += lvl * am * hum
+                }
+                // ── Emergency diesel generators ──
+                if self.dieselMode == 1 {
+                    // Cranking: slow starter chug — noise bursts at ~6.5 Hz.
+                    let chug = max(0, sin(2 * .pi * 6.5 * self.t))
+                    s += 0.11 * g * chug * chug * chug * self.noise()
+                    s += 0.02 * g * sin(2 * .pi * 18 * self.t)
+                } else if self.dieselMode == 2 {
+                    // Running: 24.5 Hz firing fundamental + harmonics + breath.
+                    let w = 2 * Double.pi * self.t
+                    s += 0.030 * g * sin(w * 24.5)
+                    s += 0.020 * g * sin(w * 49.2)
+                    s += 0.010 * g * sin(w * 73.6)
+                    s += 0.010 * g * self.noise()
                 }
                 // ── Annunciator chime (horn owns the channel) ──
                 if self.hornAt < 0, self.chimeAt >= 0 {
@@ -239,6 +254,9 @@ final class SoundEngine: @unchecked Sendable {
         humLevel = max(0, min(1, rpmFraction))
         humPitch = max(0, min(1.1, rpmFraction))
     }
+
+    /// Emergency diesel state: 0 off, 1 cranking, 2 running.
+    func setDiesel(_ mode: Int) { dieselMode = mode }
 
     func setPaused(_ paused: Bool) {
         gateTarget = paused ? 0 : 1
