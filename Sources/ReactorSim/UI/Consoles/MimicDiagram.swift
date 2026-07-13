@@ -824,32 +824,32 @@ struct MimicDiagram: View {
         v.closeSubpath()
         ctx.fill(v, with: .color(Theme.equipFill))
 
-        // The WHOLE vessel is a thermal map, not just the core: the downcomer
-        // and lower plenum carry cold-leg water, the upper plenum runs at the
-        // hot-leg temperature — so the vessel interior tints with the live
-        // coolant temperatures around the flux field. (Collapses to graphite
-        // on the AUTHENTIC skins because colorFor gates on skin.)
-        do {
-            let cCold = Theme.colorFor(snap.coldLegTempK, trip: 620)
-            let cHot  = Theme.colorFor(snap.hotLegTempK,  trip: 620)
-            let core = CGRect(x: body.minX + body.width * 0.10, y: body.minY + body.height * 0.13,
-                              width: body.width * 0.80, height: body.height * 0.66)
-            var inner = ctx
-            inner.clip(to: v)
-            // Base: cold-leg water everywhere (downcomer + lower plenum + bottom head).
-            inner.fill(Path(CGRect(x: body.minX, y: body.minY - domeH, width: body.width,
-                                   height: body.height + domeH * 1.8)),
-                       with: .color(cCold.opacity(0.10)))
-            // Upper plenum: hot-leg water from the core outlet up into the head,
-            // fading with elevation.
-            let up = CGRect(x: core.minX - 2, y: body.minY - domeH * 0.4,
-                            width: core.width + 4, height: core.minY - body.minY + domeH * 0.4)
-            inner.fill(Path(up), with: .linearGradient(
-                Gradient(colors: [cHot.opacity(0.05), cHot.opacity(0.20)]),
-                startPoint: CGPoint(x: up.midX, y: up.minY),
-                endPoint: CGPoint(x: up.midX, y: up.maxY)))
+        // The colourful area IS the RPV (user direction): the flux field fills
+        // the full capsule silhouette — domes included — clipped to the shell.
+        // The axial profile maps bottom-dome → top-dome; the cosine's dark
+        // ends land naturally in the heads, so the shape still reads.
+        let field = CGRect(x: body.minX, y: body.minY - domeH * 0.50,
+                           width: body.width, height: body.height + domeH * 0.93)
+        var inner = ctx
+        inner.clip(to: v)
+        coreBands(inner, field, snap: snap)
+        // Assembly lattice hints, clipped to the capsule.
+        for gx in 1..<4 {
+            let x = field.minX + field.width * CGFloat(gx) / 4
+            inner.stroke(Path { p in p.move(to: CGPoint(x: x, y: field.minY)); p.addLine(to: CGPoint(x: x, y: field.maxY)) },
+                         with: .color(Theme.ink.opacity(0.12)), lineWidth: 0.75)
+        }
+        for gy in 1..<5 {
+            let y = field.minY + field.height * CGFloat(gy) / 5
+            inner.stroke(Path { p in p.move(to: CGPoint(x: field.minX, y: y)); p.addLine(to: CGPoint(x: field.maxX, y: y)) },
+                         with: .color(Theme.ink.opacity(0.12)), lineWidth: 0.75)
         }
         ctx.stroke(v, with: .color(alarm ?? Theme.ink.opacity(0.32)), lineWidth: alarm == nil ? 1 : 2)
+        if snap.powerFraction > 1.10 {
+            // Overpower rim on the capsule itself.
+            ctx.stroke(v, with: .color(Theme.alarm.opacity(min(1, (snap.powerFraction - 1.10) / 0.10))), lineWidth: 2)
+        }
+        fluxScale(ctx, x: body.minX - 26, core: body)
 
         // CRDM drive housings above the head — SAME x-positions as the rods
         // below, so each drive line reads as one continuous mechanism.
@@ -862,35 +862,15 @@ struct MimicDiagram: View {
             }, with: .color(Theme.ink.opacity(0.14)), lineWidth: 1)
         }
 
-        // Core region with glow + assembly lattice — the heatmap IS the module:
-        // it spans nearly the whole vessel interior, with slim margins for the
-        // downcomer annulus and the plena.
-        let core = CGRect(x: body.minX + body.width * 0.10, y: body.minY + body.height * 0.13,
-                          width: body.width * 0.80, height: body.height * 0.66)
-        coreBands(ctx, core, snap: snap)
-        fluxScale(ctx, x: body.minX - 26, core: core)
-        if snap.powerFraction > 1.10 {
-            ctx.stroke(Path(core), with: .color(Theme.alarm.opacity(min(1, (snap.powerFraction - 1.10) / 0.10))), lineWidth: 2)
-        } else {
-            ctx.stroke(Path(core), with: .color(Theme.ink.opacity(0.20)), lineWidth: 1)
-        }
-        for gx in 1..<4 {
-            let x = core.minX + core.width * CGFloat(gx) / 4
-            ctx.stroke(Path { p in p.move(to: CGPoint(x: x, y: core.minY)); p.addLine(to: CGPoint(x: x, y: core.maxY)) },
-                       with: .color(Theme.ink.opacity(0.12)), lineWidth: 0.75)
-        }
-        for gy in 1..<3 {
-            let y = core.minY + core.height * CGFloat(gy) / 3
-            ctx.stroke(Path { p in p.move(to: CGPoint(x: core.minX, y: y)); p.addLine(to: CGPoint(x: core.maxX, y: y)) },
-                       with: .color(Theme.ink.opacity(0.12)), lineWidth: 0.75)
-        }
+        // Rod geometry references (the field spans the capsule).
+        let core = field
 
         // Control rods: enter from the top head, inserted depth ∝ rodPosition.
         // Each drive is drawn as ONE line: CRDM housing above the dome, then
         // (continuing at the same x) the rod hanging below the head.
         let rodPos = max(0, min(1, snap.rodPosition))
         let rodTop = body.minY + 4
-        let rodSpan = core.maxY - rodTop
+        let rodSpan = body.maxY - 6 - rodTop
         for i in 0..<4 {
             let x = core.minX + core.width * (0.12 + 0.25 * CGFloat(i))
             // Drive housing + lead screw: one thin line from above the dome all
