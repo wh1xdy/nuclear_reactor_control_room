@@ -197,12 +197,15 @@ final class PlantSupervisor {
     var nominalMWt:      Double { plant.params.nominalPower / 1e6 }
 
     init(kind: ReactorKind = .pwr) {
-        let p: PlantParams
+        var p: PlantParams
         switch kind {
         case .pwr: p = .pwr()
         case .bwr: p = .bwr()
         case .smr: p = .smr()
         }
+        // OpenMC calibration applies to the PWR-type lattices; BWR physics is
+        // void-dominated and keeps its own profile.
+        if kind != .bwr { p.applyCalibration() }
         plant = ReactorPlant(params: p)
         let elecMW = p.nominalPower * p.turbineEfficiency / 1e6
         pressureMPa = p.nominalPressureMPa
@@ -500,11 +503,18 @@ final class PlantSupervisor {
                 let drive = min(1.0, (pf - 1.03) * 25)          // full rate by ~107%
                 rodPosition = max(0, min(1, rodPosition + 0.0053 * drive * dt))
             } else {
-                let err = snapshot.coolantTempK - 550.0
+                // Two-term command (Westinghouse-style): T-avg error plus a
+                // power-rate lead. With transport-calibrated feedback (MTC
+                // −18 vs the hand-tuned −30 pcm/K) the plant self-damps half
+                // as hard, and T-avg-only proportional control hunts against
+                // the flux limiter. The rate term arrests rod motion while
+                // power is still moving; the block near the limiter band
+                // keeps the two channels from bang-banging at coarse frames.
+                let err = (snapshot.coolantTempK - 550.0) + 2.0 * _rate.dPw
                 if abs(err) > 0.5 {
-                    // hot → insert (demand up), cold → withdraw
-                    let rate = max(-1.0, min(1.0, err * 0.2)) * 0.0053
-                    rodPosition = max(0, min(1, rodPosition + rate * dt))
+                    var drive = max(-1.0, min(1.0, err * 0.2))
+                    if drive < 0 && pf > 1.01 { drive = 0 }   // withdrawal block
+                    rodPosition = max(0, min(1, rodPosition + drive * 0.0053 * dt))
                 }
             }
         }
@@ -646,8 +656,9 @@ final class PlantSupervisor {
         let vPrimary = 300.0   // m³ approximate primary coolant volume
         let dB = (borationRate * 150.0 - dilutionRate * boronPPM) / vPrimary * dt
         boronPPM = max(0, boronPPM + dB)
-        // Reactivity: −8 pcm/ppm, nominal 800 ppm → 0 reactivity
-        plant.params.externalReactivity = -8e-5 * (boronPPM - 800.0) + malfRho
+        // Differential boron worth from PlantParams (OpenMC-calibrated when
+        // calibration.json is bundled); nominal 800 ppm → 0 reactivity.
+        plant.params.externalReactivity = plant.params.boronWorthPcmPerPpm * 1e-5 * (boronPPM - 800.0) + malfRho
     }
 
     // MARK: — Alarms
@@ -822,6 +833,9 @@ final class PlantSupervisor {
         if invMPoints.count > 80 { invMPoints.removeFirst() }
     }
 
+    /// Integral rod-worth shape (calibrated table or analytic S-curve).
+    func rodWorthShape(_ x: Double) -> Double { plant.params.rodShape(x) }
+
     /// Reactivity components [Δk/k] for the ECP block.
     var rhoComponents: (boron: Double, xenon: Double, mod: Double, dop: Double) {
         let p = plant.params
@@ -844,7 +858,7 @@ final class PlantSupervisor {
         var lo = 0.0, hi = 1.0
         for _ in 0..<40 {
             let mid = (lo + hi) / 2
-            if 3 * mid * mid - 2 * mid * mid * mid < wNeeded { lo = mid } else { hi = mid }
+            if plant.params.rodShape(mid) < wNeeded { lo = mid } else { hi = mid }
         }
         return Int((228 * (1 - (lo + hi) / 2)).rounded())
     }

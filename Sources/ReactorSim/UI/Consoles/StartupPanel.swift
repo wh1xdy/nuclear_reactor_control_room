@@ -163,8 +163,9 @@ struct StartupPanel: View {
             var differential = Path()
             for i in 0...60 {
                 let x = Double(i) / 60
-                let w = (3 * x * x - 2 * x * x * x) * worth
-                let d = 6 * x * (1 - x) * worth / 4                // scaled to share the axis
+                let w = supervisor.rodWorthShape(x) * worth
+                let d = (supervisor.rodWorthShape(min(1, x + 0.01)) - supervisor.rodWorthShape(max(0, x - 0.01)))
+                        / 0.02 * worth / 4                          // numeric dW/dx, shared axis
                 let pi = CGPoint(x: px(x), y: py(w))
                 let pd = CGPoint(x: px(x), y: py(d))
                 if i == 0 { integral.move(to: pi); differential.move(to: pd) }
@@ -174,7 +175,7 @@ struct StartupPanel: View {
             ctx.stroke(differential, with: .color(Theme.accent.opacity(0.6)),
                        style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             let xNow = supervisor.snapshot.rodPosition
-            let wNow = (3 * xNow * xNow - 2 * xNow * xNow * xNow) * worth
+            let wNow = supervisor.rodWorthShape(xNow) * worth
             let dot = CGPoint(x: px(xNow), y: py(wNow))
             ctx.fill(Path(ellipseIn: CGRect(x: dot.x - 3, y: dot.y - 3, width: 6, height: 6)),
                      with: .color(Theme.isFlat ? Theme.ink : Theme.statusNormal))

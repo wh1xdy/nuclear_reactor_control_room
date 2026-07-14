@@ -82,7 +82,7 @@ final class ReactorPlant {
     private func computeReactivity(_ ctrl: ControlInputs) -> Double {
         let p = params
         let x = rodPosEffective
-        let w = 3*x*x - 2*x*x*x          // S-curve: integrated cosine profile
+        let w = p.rodShape(x)            // calibrated table or integrated-cosine S-curve
         var rho = w * p.rodWorth
         if scrammed { rho += p.scramExtraWorth }
         rho += p.fuelTempCoeff    * (thermal.tFuel - p.nominalFuelTemp)

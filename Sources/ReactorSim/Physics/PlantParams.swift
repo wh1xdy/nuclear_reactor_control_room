@@ -87,6 +87,50 @@ struct PlantParams: Sendable {
     // MARK: — Temperature feedback coefficients [Δk/k per K]
     var fuelTempCoeff: Double    = -2.0e-5    // Doppler, −2 pcm/K
     var coolantTempCoeff: Double = -3.0e-4    // moderator, −20 to −50 pcm/K
+    // Boron differential worth [pcm/ppm] (negative). Overridden by the OpenMC
+    // calibration when calibration.json is bundled.
+    var boronWorthPcmPerPpm: Double = -8.0
+
+    // Optional OpenMC-derived integral rod-worth SHAPE (normalized 0…1 over
+    // insertion 0…1). The TOTAL bank worth stays `rodWorth` — a single rodded
+    // assembly can't measure all banks; transport gives us the curve's shape.
+    var rodShapeX: [Double]? = nil
+    var rodShapeW: [Double]? = nil
+
+    /// Integral rod-worth shape w(x) ∈ 0…1 at insertion x ∈ 0…1: the OpenMC
+    /// table when calibrated, else the analytic integrated-cosine S-curve.
+    func rodShape(_ x: Double) -> Double {
+        let xc = max(0, min(1, x))
+        guard let xs = rodShapeX, let ws = rodShapeW, xs.count == ws.count, xs.count >= 2 else {
+            return 3 * xc * xc - 2 * xc * xc * xc
+        }
+        for i in 1..<xs.count where xc <= xs[i] {
+            let f = (xc - xs[i - 1]) / max(1e-9, xs[i] - xs[i - 1])
+            return ws[i - 1] + (ws[i] - ws[i - 1]) * f
+        }
+        return ws[ws.count - 1]
+    }
+
+    /// Apply the OpenMC calibration file (bundled as calibration.json) on top
+    /// of the defaults. Absent/malformed file → defaults, silently.
+    mutating func applyCalibration() {
+        struct Cal: Decodable {
+            var boron_pcm_per_ppm: Double?
+            var ftc_pcm_per_K: Double?
+            var mtc_pcm_per_K: Double?
+            var rod_shape_x: [Double]?
+            var rod_shape_w: [Double]?
+        }
+        guard let url = Bundle.module.url(forResource: "calibration", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let cal = try? JSONDecoder().decode(Cal.self, from: data) else { return }
+        if let v = cal.boron_pcm_per_ppm, v < 0 { boronWorthPcmPerPpm = v }
+        if let v = cal.ftc_pcm_per_K, v < 0 { fuelTempCoeff = v * 1e-5 }
+        if let v = cal.mtc_pcm_per_K, v < 0 { coolantTempCoeff = v * 1e-5 }
+        if let xs = cal.rod_shape_x, let ws = cal.rod_shape_w, xs.count == ws.count, xs.count >= 2 {
+            rodShapeX = xs; rodShapeW = ws
+        }
+    }
 
     // MARK: — Xenon / Iodine dynamics
     var gammaXe: Double         = 0.065       // effective I-135 fission yield
