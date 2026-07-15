@@ -39,6 +39,17 @@ final class PlantSupervisor {
     var genBreakerOpen:   Bool  = false
     var line1BreakerOpen: Bool  = false
     var line2BreakerOpen: Bool  = false
+    /// Generator paralleled to the grid. True at power; false during a cold
+    /// startup until the operator syncs (rolls the turbine to speed, catches the
+    /// synchroscope at 12 o'clock, closes 52G). Unsynced ⇒ 0 grid MWe.
+    var genSynced: Bool = true
+
+    // MARK: — Startup state
+    enum StartMode { case atPower, coldStartup }
+    /// Set while a cold startup is in progress (subcritical → on the grid); the
+    /// hot-standby temperature hold and sync gating key off it. Cleared once the
+    /// plant is generating on the grid above ~10 %.
+    private(set) var coldStartActive = false
 
     // MARK: — Auxiliary (station) power — the LOOP/SBO state machine.
     // GRID: offsite or the unit's own generator feeds the aux buses.
@@ -196,7 +207,7 @@ final class PlantSupervisor {
     var nominalMWe:      Double { plant.params.nominalPower * plant.params.turbineEfficiency / 1e6 }
     var nominalMWt:      Double { plant.params.nominalPower / 1e6 }
 
-    init(kind: ReactorKind = .pwr) {
+    init(kind: ReactorKind = .pwr, mode: StartMode = .atPower) {
         var p: PlantParams
         switch kind {
         case .pwr: p = .pwr()
@@ -209,24 +220,40 @@ final class PlantSupervisor {
         plant = ReactorPlant(params: p)
         let elecMW = p.nominalPower * p.turbineEfficiency / 1e6
         pressureMPa = p.nominalPressureMPa
+        let cold = (mode == .coldStartup)
         snapshot = PlantSnapshot(
-            time: 0, powerFraction: 1, thermalPowerW: p.nominalPower,
-            electricPowerW: p.nominalPower * p.turbineEfficiency,
-            fuelTempK: 900, coolantTempK: 550, sgTempK: 553,
+            time: 0, powerFraction: cold ? 0 : 1,
+            thermalPowerW: cold ? 0 : p.nominalPower,
+            electricPowerW: cold ? 0 : p.nominalPower * p.turbineEfficiency,
+            fuelTempK: cold ? 550 : 900, coolantTempK: 550, sgTempK: cold ? 550 : 553,
             reactivity: 0, xenonInventory: 0, iodineInventory: 0,
-            rodPosition: 0, scrammed: false, decayHeatFraction: 0
+            rodPosition: cold ? 1 : 0, scrammed: false, decayHeatFraction: 0
         )
         let n = 600
-        histPower  = Array(repeating: 100.0,                 count: n)
+        histPower  = Array(repeating: cold ? 0 : 100.0,      count: n)
         histReact  = Array(repeating: 0.0,                   count: n)
-        histFuelT  = Array(repeating: 900.0,                 count: n)
+        histFuelT  = Array(repeating: cold ? 550 : 900.0,    count: n)
         histDecay  = Array(repeating: 0.0,                   count: n)
         histPress  = Array(repeating: p.nominalPressureMPa,  count: n)
-        histElec   = Array(repeating: elecMW,                count: n)
-        histSteamT = Array(repeating: 553.0,                 count: n)
+        histElec   = Array(repeating: cold ? 0 : elecMW,     count: n)
+        histSteamT = Array(repeating: cold ? 550 : 553.0,    count: n)
         histCoolT  = Array(repeating: 550.0,                 count: n)
         histTime   = Array(repeating: 0.0,                   count: n)
         histAO     = Array(repeating: 0.0,                   count: n)
+
+        if cold {
+            // Hot standby: rods in, source-range flux, turbine offline, generator
+            // off the bus. The operator drives the approach to criticality.
+            plant.coldStandby()
+            coldStartActive = true
+            rodPosition   = 1.0
+            turbineValve  = 0.0
+            turbineTrip   = true
+            feedwaterValve = 0.0
+            genBreakerOpen = true
+            genSynced      = false
+            turbineGen.park()
+        }
         sound.start()
     }
 
@@ -301,15 +328,22 @@ final class PlantSupervisor {
             primaryFlow:    effFlow,
             turbineValve:   effectiveValve,
             turbineTripped: turbineTrip,
+            gridConnected:  genSynced,
             scram:          scrammed,
             primaryPressureMPa: pressureMPa   // live PZR pressure → DNBR anchor
         )
         snapshot = plant.step(dt: dt, ctrl: ctrl)
         scrammed = snapshot.scrammed
 
+        // Turbine-generator. Off the bus (pre-sync) the machine free-runs on the
+        // throttle; the synchroscope shows the slip.
+        let steaming = !turbineTrip && effectiveValve > 0.03 && snapshot.powerFraction > 0.02
         turbineGen.step(dt: dt, grossMWe: snapshot.electricPowerW / 1e6,
-                        tripped: turbineTrip || genBreakerOpen || (line1BreakerOpen && line2BreakerOpen),
+                        tripped: turbineTrip || (genSynced && (genBreakerOpen || (line1BreakerOpen && line2BreakerOpen))),
+                        synced: genSynced, steaming: steaming,
                         ratedMWe: nominalMWe)
+        // Cold startup completes once the unit is paralleled and carrying load.
+        if coldStartActive && genSynced && snapshot.powerFraction > 0.10 { coldStartActive = false }
         // Containment atmosphere: fed by any primary break (LOCA malfunction)
         // plus PORV discharge once the relief tank vents; coolers need AC,
         // spray needs the ESF buses (diesels suffice).
@@ -330,13 +364,17 @@ final class PlantSupervisor {
         // the reverse-power relay OPENS the gen breaker on a turbine trip, and
         // auto-sync recloses it when the trip clears — so the drawn breaker,
         // the stored state, and the sound are always the same event.
-        if turbineTrip && !_prevTbnTrip && !genBreakerOpen {
-            genBreakerOpen = true
-            sound.clunk(closing: false)
-        }
-        if !turbineTrip && _prevTbnTrip && genBreakerOpen {
-            genBreakerOpen = false
-            sound.clunk(closing: true)
+        // Only while already paralleled — during a cold startup the operator
+        // syncs manually, so the reverse-power/auto-sync relay stays out of it.
+        if genSynced {
+            if turbineTrip && !_prevTbnTrip && !genBreakerOpen {
+                genBreakerOpen = true
+                sound.clunk(closing: false)
+            }
+            if !turbineTrip && _prevTbnTrip && genBreakerOpen {
+                genBreakerOpen = false
+                sound.clunk(closing: true)
+            }
         }
 
         let majorEvent = (scrammed && !_prevScrammed) || (eccsActuated && !_prevECCS)
@@ -413,6 +451,23 @@ final class PlantSupervisor {
     /// Opening the generator breaker while synchronised is a load rejection —
     /// the turbine trips (no electrical load → overspeed protection).
     func toggleGenBreaker() {
+        // Pre-sync (cold startup): closing 52G PARALLELS the generator — allowed
+        // only at speed and near phase (catch the synchroscope at 12 o'clock).
+        if !genSynced {
+            guard genBreakerOpen else { return }        // already off the bus
+            guard turbineGen.readyToSync else {
+                scramMessage = "52G CLOSE BLOCKED — turbine not at speed (roll to 3000 rpm)"; return
+            }
+            let a = abs(turbineGen.syncAngleDeg)
+            guard a < 20 || a > 340 else {
+                scramMessage = "52G — OUT OF PHASE, close as the synchroscope passes 12"; return
+            }
+            genSynced = true
+            genBreakerOpen = false
+            sound.clunk(closing: true)
+            scramMessage = "GENERATOR SYNCHRONISED — on the grid"
+            return
+        }
         // Sync check: closing 52G onto a tripped/dead turbine is REJECTED (no
         // state change, no sound) — you can't parallel a machine that isn't
         // at speed. Clear the turbine trip first; auto-sync then recloses.
@@ -478,12 +533,33 @@ final class PlantSupervisor {
                     }
                 }
                 if _seqPhase == 2 {
-                    startupPhase = "POWER ASCENSION — RAMPING TURBINE"
-                    turbineValve = min(1.0, turbineValve + 0.005 * dt)
-                    if pf >= 0.98 && turbineValve >= 0.999 {
-                        startupPhase = "AT POWER — SEQ COMPLETE"
-                        autoStartup = false           // hands over to rod auto
-                        _seqPhase = 0
+                    // Auto-sync the generator once it rolls up to speed (a cold
+                    // startup boots off the bus; the sequencer parallels it).
+                    if !genSynced {
+                        startupPhase = "ROLLING TURBINE — AUTO SYNC"
+                        turbineValve = max(turbineValve, 0.08)   // roll on modest steam
+                        if turbineGen.readyToSync {
+                            genSynced = true; genBreakerOpen = false
+                            sound.clunk(closing: true)
+                        }
+                    } else {
+                        // Power-limited ascension: open the throttle only while
+                        // below 100 % and while power isn't already climbing hard,
+                        // so the reactor follows without riding the period into a
+                        // high-flux trip (a wide-open ramp from a low-power sync
+                        // overshoots to ~120 %).
+                        startupPhase = "POWER ASCENSION — RAMPING TURBINE"
+                        // Ramp the throttle fully open, pausing whenever power is
+                        // climbing fast (rate brake) so the reactor tracks the
+                        // steam demand without riding the period into a trip.
+                        if turbineValve < 0.999 && _rate.dPw < 0.20 {
+                            turbineValve = min(1.0, turbineValve + 0.0025 * dt)
+                        }
+                        if turbineValve >= 0.999 && pf >= 0.95 {
+                            startupPhase = "AT POWER — SEQ COMPLETE"
+                            autoStartup = false           // hands over to rod auto
+                            _seqPhase = 0
+                        }
                     }
                 }
             }

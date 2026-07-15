@@ -52,16 +52,55 @@ final class TurbineGenerator {
     var fieldA: Double { emf * fieldAperE }
     var fieldV: Double { fieldA * fieldOhms }
 
-    func step(dt: Double, grossMWe: Double, tripped: Bool, ratedMWe: Double = 990) {
+    /// Park the machine for a cold startup: shaft stopped (turning gear), field
+    /// off, no load. The operator rolls it up on steam before syncing.
+    func park() {
+        rpm = 0; emf = 1.0; mvar = 0; statorKA = 0; loadAngleDeg = 0
+        powerFactor = 0; syncAngleDeg = 0
+    }
+
+    /// Synchroscope needle angle [deg, 0 = 12 o'clock / in phase]. Advances at
+    /// the slip frequency while the machine is off the bus; parks at 12 once
+    /// synced. The operator closes 52G as it creeps through 12.
+    private(set) var syncAngleDeg: Double = 0
+    /// True when the free-running machine is near rated speed — safe to parallel.
+    var readyToSync: Bool { rpm > 2900 }
+
+    func step(dt: Double, grossMWe: Double, tripped: Bool,
+              synced: Bool = true, steaming: Bool = false, ratedMWe: Double = 990) {
         sBaseMVA = max(1, ratedMWe) / pfSet   // rating at the design power factor
         let rated = max(1, ratedMWe)
-        // ── Shaft speed: governed at 3000 while on the grid; exponential
-        //    coastdown (τ ≈ 8 min) once tripped.
+        // ── Shaft speed ─────────────────────────────────────────────────────
+        // On the bus: governed at 3000. Off the bus but steaming: rolls up on
+        // the throttle (free-running). Off the bus and no steam: coasts down.
         if tripped {
             rpm += (0 - rpm) / 480.0 * dt
             if rpm < 1 { rpm = 0 }
+        } else if !synced {
+            let target = steaming ? 3000.0 : 0.0
+            rpm += (target - rpm) / (steaming ? 25.0 : 480.0) * dt
+            if rpm < 1 { rpm = 0 }
         } else {
             rpm += (3000 - rpm) / 20.0 * dt   // resync/run-up is governor-fast
+        }
+        // Synchroscope: slip = f_gen − f_grid = rpm/60 − 50 [Hz]; needle rotates
+        // 360°/s per Hz. Parks toward 12 o'clock once paralleled.
+        if synced || tripped {
+            syncAngleDeg *= max(0, 1 - 4 * dt)          // ease to 0 (12 o'clock)
+        } else {
+            syncAngleDeg += (rpm / 60.0 - 50.0) * 360.0 * dt
+            syncAngleDeg = syncAngleDeg.truncatingRemainder(dividingBy: 360)
+        }
+        // Off the bus → no real/reactive load; excitation idles at no-load emf.
+        if !synced && !tripped {
+            emf += (1.0 - emf) / (tauExc * 4) * dt
+            mvar = 0; statorKA = 0; loadAngleDeg = 0; powerFactor = 0
+            let load = 0.0
+            brgMetalC += ((60 + 32 * load) - brgMetalC) / 300 * dt
+            statorC   += ((55 + 42 * load) - statorC)  / 600 * dt
+            lubeC     += ((44 +  8 * load) - lubeC)    / 400 * dt
+            h2GasC    += ((40 +  6 * load) - h2GasC)   / 900 * dt
+            return
         }
 
         // ── Excitation / AVR ────────────────────────────────────────────────

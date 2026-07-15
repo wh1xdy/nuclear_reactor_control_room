@@ -11,6 +11,7 @@ struct ControlInputs {
     var primaryFlow: Double  = 1.0
     var turbineValve: Double = 1.0   // effective SG heat-removal valve (turbine or steam dump)
     var turbineTripped: Bool = false // generator off the grid → 0 MWe even if dump flows
+    var gridConnected: Bool  = true  // generator paralleled to the grid (false = pre-sync)
     var scram: Bool          = false
     /// Live primary pressure from the supervisor's pressurizer model [MPa].
     /// Feeds the DNBR saturation anchor so depressurisation erodes the margin;
@@ -137,7 +138,7 @@ final class ReactorPlant {
             // reads 100% at steady full power regardless of decay-heat buildup.
             powerFraction:     kinetics.n * fissionShare + decayHeat.fraction,
             thermalPowerW:     (kinetics.n * fissionShare + decayHeat.fraction) * p.nominalPower,
-            electricPowerW:    ctrl.turbineTripped ? 0 : thermal.electricPower,
+            electricPowerW:    (ctrl.turbineTripped || !ctrl.gridConnected) ? 0 : thermal.electricPower,
             fuelTempK:         thermal.tFuel,
             coolantTempK:      thermal.tAvg,
             sgTempK:           thermal.tSG,
@@ -173,6 +174,19 @@ final class ReactorPlant {
     func resetScram() {
         scrammed = false
         // Leave rodPosEffective where it is (rods stay fully inserted until operator withdraws)
+    }
+
+    /// Boot the plant in hot standby: rods fully inserted (deeply subcritical),
+    /// flux at the source-range floor, primary isothermal at no-load T-avg. The
+    /// operator withdraws rods to approach criticality (real 1/M).
+    func coldStandby() {
+        scrammed = false
+        rodPosEffective = 1.0
+        // Seed the precursors NEAR the deep-subcritical source floor so the count
+        // rate rises monotonically as rods withdraw (an over-seeded core drains
+        // its precursors and the 1/M curve dips before it climbs).
+        kinetics.setLevel(params.neutronSource / 2500.0)
+        thermal.setHotStandby()
     }
 
     /// End-of-cycle core mode: strengthens the axial-xenon feedback toward the

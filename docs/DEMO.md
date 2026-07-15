@@ -2,6 +2,25 @@
 
 En sida att ha bredvid dig. Målet: 5–7 minuter som ser kontrollerat och proffsigt ut.
 
+## Startmenyn
+
+Appen öppnar på en startmeny: välj **reaktor** (PWR/BWR/SMR) och **startvillkor**:
+- **AT POWER** — anläggningen på 100 %, hoppa rakt in i drift (det snabba demot nedan).
+- **COLD STARTUP** — hot standby, underkritisk. Du kör igång kraftverket själv (se nedan). Mest imponerande, men tar några minuter.
+
+## Kallstart-demot (om du vill visa uppstarten — ~5–8 min)
+
+Välj **PWR · COLD STARTUP**. Anläggningen bootar underkritisk (0 % effekt, −4500 pcm, stavar helt inne, turbin stilla, generator OFF BUS).
+
+1. **Bump farten till ×10** (tryck `+` en gång) — stavuttaget är hastighetsbegränsat, så det går trögt i ×1.
+2. **Dra ut stavarna**: håll `W` (eller `Shift+W`). Titta på **1/M-plotten** (klicka NEUTRONICS-rutan) — linjen extrapolerar mot kritiskt. Runt **~195 SWD** blir den kritisk och effekten börjar klättra ur källområdet.
+3. När effekten passerar ~5–15 %: slå på **stav-auto (O)** så den håller sig, och sänk farten till ×1.
+4. **Rulla turbinen**: tryck `T` (rensa turbintrippen), öppna **TBN GOV** (`E`) en bit. Varvtalet stiger mot 3000 — synkroskopet snurrar och **saktar in** när det närmar sig.
+5. **Synka**: när synkroskopet visar **CLOSE 52G AT 12** och nålen kryper förbi 12, klicka **52G-brytaren** i ställverket. "GENERATOR SYNCHRONISED" — MWe börjar byggas.
+6. **Lasta upp**: öppna TBN GOV mer, dra ut stavar / låt auto hålla T-avg. Du är i drift.
+
+> Om du vill slippa det manuella: **AUTO STARTUP (U)** kör hela sekvensen automatiskt.
+
 ## Innan hon kommer (2 min)
 
 1. **Stäng av Screen Time-nedtid.** ⚠️ Datorn har just nu en Screen Time-gräns
