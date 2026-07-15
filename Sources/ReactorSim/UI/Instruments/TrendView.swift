@@ -68,42 +68,53 @@ struct TrendView: View {
                 ctx.stroke(gp, with: .color(Theme.ink.opacity(vgridO)), lineWidth: 0.5)
             }
 
-            // Channel label (top-left) + current value (top-right, inside plot)
-            ctx.draw(
-                Text(label).font(.system(size: 9, design: .monospaced)).foregroundColor(Theme.textDim),
-                at: CGPoint(x: plot.minX + 5, y: plot.minY + 4), anchor: .topLeading)
+            // Series — clipped to the plot, no end-dot decoration. Drawn BEFORE
+            // the label/value text so a trace pinned at the label height (e.g.
+            // 100% power) can't strike through the glyphs — the text knocks out
+            // over it below.
+            if values.count >= 2 {
+                let n = values.count
+                var lp = Path()
+                for (i, v) in values.enumerated() {
+                    let frac = max(0, min(1, (v - yLo) / max(1e-9, yHi - yLo)))
+                    let pt = CGPoint(
+                        x: plot.minX + 2 + CGFloat(i) * (plot.width - 4) / CGFloat(n - 1),
+                        y: plot.maxY - 2 - CGFloat(frac) * (plot.height - 4))
+                    if i == 0 { lp.move(to: pt) } else { lp.addLine(to: pt) }
+                }
+                var series = ctx
+                series.clip(to: Path(plot))
+                series.stroke(lp, with: .color(color), lineWidth: 1.2)
+
+                // Current-value pointer on the right frame edge
+                if let current = values.last {
+                    let frac = max(0, min(1, (current - yLo) / max(1e-9, yHi - yLo)))
+                    let y = plot.maxY - 2 - CGFloat(frac) * (plot.height - 4)
+                    var marker = Path()
+                    marker.move(to: .init(x: plot.maxX - 6, y: y))
+                    marker.addLine(to: .init(x: plot.maxX - 1, y: y - 3))
+                    marker.addLine(to: .init(x: plot.maxX - 1, y: y + 3))
+                    marker.closeSubpath()
+                    ctx.fill(marker, with: .color(color))
+                }
+            }
+
+            // Channel label (top-left) + current value (top-right), each on a
+            // knockout chip so the trace reads behind them, not through them.
+            func chip(_ text: Text, at p: CGPoint, anchor: UnitPoint, bold: Bool) {
+                let resolved = ctx.resolve(text)
+                let sz = resolved.measure(in: CGSize(width: 200, height: 20))
+                var box = CGRect(x: p.x, y: p.y - 1, width: sz.width + 6, height: sz.height + 2)
+                if anchor == .topTrailing { box.origin.x = p.x - sz.width - 6 }
+                ctx.fill(Path(roundedRect: box, cornerRadius: 3), with: .color(Theme.panel))
+                ctx.draw(resolved, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
+            }
+            chip(Text(label).font(.system(size: 9, design: .monospaced)).foregroundColor(Theme.textDim),
+                 at: CGPoint(x: plot.minX + 3, y: plot.minY + 3), anchor: .topLeading, bold: false)
             if let current = values.last {
-                ctx.draw(
-                    Text(axisStr(current))
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                chip(Text(axisStr(current)).font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundColor(Theme.ink),
-                    at: CGPoint(x: plot.maxX - 5, y: plot.minY + 4), anchor: .topTrailing)
-            }
-
-            // Series — clipped to the plot, no end-dot decoration
-            guard values.count >= 2 else { return }
-            let n = values.count
-            var lp = Path()
-            for (i, v) in values.enumerated() {
-                let frac = max(0, min(1, (v - yLo) / max(1e-9, yHi - yLo)))
-                let pt = CGPoint(
-                    x: plot.minX + 2 + CGFloat(i) * (plot.width - 4) / CGFloat(n - 1),
-                    y: plot.maxY - 2 - CGFloat(frac) * (plot.height - 4))
-                if i == 0 { lp.move(to: pt) } else { lp.addLine(to: pt) }
-            }
-            ctx.clip(to: Path(plot))
-            ctx.stroke(lp, with: .color(color), lineWidth: 1.2)
-
-            // Current-value pointer on the right frame edge
-            if let current = values.last {
-                let frac = max(0, min(1, (current - yLo) / max(1e-9, yHi - yLo)))
-                let y = plot.maxY - 2 - CGFloat(frac) * (plot.height - 4)
-                var marker = Path()
-                marker.move(to: .init(x: plot.maxX - 6, y: y))
-                marker.addLine(to: .init(x: plot.maxX - 1, y: y - 3))
-                marker.addLine(to: .init(x: plot.maxX - 1, y: y + 3))
-                marker.closeSubpath()
-                ctx.fill(marker, with: .color(color))
+                     at: CGPoint(x: plot.maxX - 3, y: plot.minY + 3), anchor: .topTrailing, bold: true)
             }
         }
     }

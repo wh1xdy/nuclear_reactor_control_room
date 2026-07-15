@@ -500,20 +500,23 @@ final class PlantSupervisor {
         if rodAutoEnabled && !scrammed && snapshot.powerFraction > 0.02 {
             let pf = snapshot.powerFraction
             if pf > 1.03 {
+                // Flux limiter: drive rods IN regardless of temperature.
                 let drive = min(1.0, (pf - 1.03) * 25)          // full rate by ~107%
                 rodPosition = max(0, min(1, rodPosition + 0.0053 * drive * dt))
             } else {
-                // Two-term command (Westinghouse-style): T-avg error plus a
-                // power-rate lead. With transport-calibrated feedback (MTC
-                // −18 vs the hand-tuned −30 pcm/K) the plant self-damps half
-                // as hard, and T-avg-only proportional control hunts against
-                // the flux limiter. The rate term arrests rod motion while
-                // power is still moving; the block near the limiter band
-                // keeps the two channels from bang-banging at coarse frames.
-                let err = (snapshot.coolantTempK - 550.0) + 2.0 * _rate.dPw
-                if abs(err) > 0.5 {
-                    var drive = max(-1.0, min(1.0, err * 0.2))
-                    if drive < 0 && pf > 1.01 { drive = 0 }   // withdrawal block
+                // Rod speed proportional to T-avg error (0.5 K deadband). The rod
+                // is an integrator, so proportional velocity control already holds
+                // T-avg offset-free — no explicit integral needed. The plant
+                // self-regulates power to the turbine demand via moderator
+                // feedback (open-loop stable); the rods only TRIM T-avg back to
+                // 550, so the gain is deliberately LOW — an aggressive controller
+                // fights an already-stable plant and limit-cycles. The withdrawal
+                // block keeps the T-avg channel from pushing power into the flux
+                // limiter (the two channels bang-banged at high gain).
+                let tErr = snapshot.coolantTempK - 550.0
+                if abs(tErr) > 0.5 {
+                    var drive = max(-1.0, min(1.0, tErr * 0.06))
+                    if drive < 0 && pf > 1.005 { drive = 0 }
                     rodPosition = max(0, min(1, rodPosition + drive * 0.0053 * dt))
                 }
             }
