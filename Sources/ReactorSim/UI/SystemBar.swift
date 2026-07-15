@@ -4,6 +4,7 @@
 // own domain chrome (mimic banner, panels, etc.).
 
 import SwiftUI
+import AppKit
 
 struct SystemBar: View {
     let supervisor: PlantSupervisor
@@ -73,6 +74,13 @@ struct SystemBar: View {
         .frame(maxWidth: .infinity)
         .frame(height: 36)
         .background(Theme.bg)
+        // The window uses a hidden title bar, so the OS title-bar double-click
+        // has no target. This strip stands in for it: double-click empty bar
+        // space to zoom the window (single taps still hit the buttons).
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            (NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first)?.zoom(nil)
+        }
     }
 }
 

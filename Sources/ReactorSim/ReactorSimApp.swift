@@ -14,7 +14,10 @@ struct ReactorSimApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1440, height: 900)
-        .windowResizability(.contentSize)
+        // contentMinSize (not contentSize) so the window can be freely resized,
+        // zoomed with the green button, and double-clicked to fill the screen —
+        // contentSize locked it to the layout size, defeating maximize.
+        .windowResizability(.contentMinSize)
         .commands {
             // Remove default menu items that don't apply
             CommandGroup(replacing: .newItem) {}
@@ -27,9 +30,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        // Ensure window comes to front
+        // Ensure the window comes to front and opens filling the screen (a
+        // control room wants the whole display). setFrame to the visible frame
+        // rather than zoom(nil) so it's deterministic regardless of the restored
+        // autosave frame; the user can still resize/zoom afterwards.
         DispatchQueue.main.async {
-            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+            guard let win = NSApp.windows.first else { return }
+            win.makeKeyAndOrderFront(nil)
+            win.collectionBehavior.insert(.fullScreenPrimary)   // green button → full screen too
+            if let vis = win.screen?.visibleFrame { win.setFrame(vis, display: true, animate: false) }
         }
     }
 

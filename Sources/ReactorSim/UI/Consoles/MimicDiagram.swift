@@ -404,7 +404,7 @@ struct MimicDiagram: View {
         pump(ctx, cp, r: fy(0.022), running: !sup.feedwaterFault && sup.feedwaterValve > 0.02, tint: Theme.accent, mirrored: true)
         txt(ctx, "CP", CGPoint(x: cp.x, y: cp.y + fy(0.040)), .center, Theme.textDim, 8)
         heaterBox(ctx, lpFwh, "LP HTR")
-        heaterBox(ctx, dae, "DAERATOR")
+        heaterBox(ctx, dae, "DEAERATOR")
         pump(ctx, fp, r: fy(0.024), running: !sup.feedwaterFault && sup.feedwaterValve > 0.05, tint: Theme.accent, mirrored: true)
         txt(ctx, "FW PUMP", CGPoint(x: fp.x, y: fp.y + fy(0.042)), .center,
             sup.feedwaterFault ? Theme.alarm : Theme.textDim, 8)
@@ -1343,10 +1343,12 @@ struct MimicDiagram: View {
                         width: (loopX - v.minX) + fx(0.036), height: v.height + fy(0.135))
         ctx.stroke(Path(roundedRect: dw, cornerRadius: fx(0.02), style: .continuous),
                    with: .color(Theme.ink.opacity(0.16)), lineWidth: 1)
-        txt(ctx, "DRYWELL", CGPoint(x: dw.minX + 5, y: dw.minY + 8), .leading, Theme.textDim, 7)
-        reading(ctx, CGPoint(x: dw.maxX - 5, y: dw.minY + 8),
+        // Label shifted right of the neutronics dock edge; the pressure sits
+        // beside it — the old top-right spot was under the main-steam line.
+        txt(ctx, "DRYWELL", CGPoint(x: dw.minX + fx(0.010), y: dw.minY + 8), .leading, Theme.textDim, 7)
+        reading(ctx, CGPoint(x: dw.minX + fx(0.010) + 38, y: dw.minY + 8),
                 String(format: "%.0f kPa", sup.containment.pressureKPa),
-                sup.containment.pressureKPa > 115 ? Theme.alarm : Theme.textDim, 8, .trailing)
+                sup.containment.pressureKPa > 115 ? Theme.alarm : Theme.textDim, 8, .leading)
 
         // Recirc pump + tags.
         pump(ctx, pumpC, r: fy(0.022), running: flowF > 0.1,
@@ -1382,10 +1384,11 @@ struct MimicDiagram: View {
         let cont = v.insetBy(dx: -fx(0.022), dy: -fy(0.030))
         ctx.stroke(Path(roundedRect: cont, cornerRadius: cont.width * 0.35, style: .continuous),
                    with: .color(Theme.ink.opacity(0.18)), lineWidth: 1)
-        txt(ctx, "CNV", CGPoint(x: cont.minX + 4, y: cont.minY + 8), .leading, Theme.textDim, 7)
-        reading(ctx, CGPoint(x: cont.maxX - 4, y: cont.minY + 8),
+        // Past the neutronics dock's right edge (the capsule tucks behind it).
+        txt(ctx, "CNV", CGPoint(x: cont.minX + fx(0.016), y: cont.minY - 7), .leading, Theme.textDim, 7)
+        reading(ctx, CGPoint(x: cont.minX + fx(0.016) + 24, y: cont.minY - 7),
                 String(format: "%.0f kPa", sup.containment.pressureKPa),
-                sup.containment.pressureKPa > 115 ? Theme.alarm : Theme.textDim, 8, .trailing)
+                sup.containment.pressureKPa > 115 ? Theme.alarm : Theme.textDim, 8, .leading)
 
         // Integral vessel shell.
         let domeH = v.width * 0.40
@@ -1506,10 +1509,14 @@ struct MimicDiagram: View {
         ctx.fill(Path(hw), with: .color(Theme.water.opacity(0.35)))
         ctx.stroke(Path(CGRect(x: hw.minX, y: hw.minY, width: hw.width, height: 1)),
                    with: .color(Theme.water.opacity(0.6)), lineWidth: 1)
-        // cooling-water tube hint
+        // Cooling-water tube hint — drawn as side stubs with a clear centre gap
+        // so the tube lines never strike through the pressure/temperature reads.
+        let gap = r.width * 0.28
         for i in 0..<3 {
             let y = r.minY + r.height * (0.34 + 0.13 * CGFloat(i))
-            ctx.stroke(Path { p in p.move(to: CGPoint(x: r.minX + 6, y: y)); p.addLine(to: CGPoint(x: r.maxX - 6, y: y)) },
+            ctx.stroke(Path { p in p.move(to: CGPoint(x: r.minX + 6, y: y)); p.addLine(to: CGPoint(x: r.midX - gap, y: y)) },
+                       with: .color(Theme.ink.opacity(0.10)), lineWidth: 1)
+            ctx.stroke(Path { p in p.move(to: CGPoint(x: r.midX + gap, y: y)); p.addLine(to: CGPoint(x: r.maxX - 6, y: y)) },
                        with: .color(Theme.ink.opacity(0.10)), lineWidth: 1)
         }
         txt(ctx, vacOK ? "VAC ●" : "VAC ▲", CGPoint(x: r.minX + 7, y: r.minY + 7), .leading,
