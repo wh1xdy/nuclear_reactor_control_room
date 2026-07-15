@@ -31,6 +31,15 @@ final class PointKinetics {
         maxLam = params.lambdaD.max() ?? 3.01
     }
 
+    /// Force the flux to a given relative level with precursors in equilibrium
+    /// for it (used to boot a cold, subcritical hot-standby state).
+    func setLevel(_ level: Double) {
+        n = max(0, level)
+        for i in 0..<C.count {
+            C[i] = params.beta[i] / (params.lambdaD[i] * params.lambdaPrompt) * n
+        }
+    }
+
     func step(dt: Double, rho: Double) {
         guard dt > 0 else { return }
         let p    = params
@@ -38,6 +47,7 @@ final class PointKinetics {
         let Lam  = p.lambdaPrompt
         let bT   = p.betaTotal
         let rbl  = (rho - bT) / Lam      // (ρ − β) / Λ — loop invariant
+        let S    = p.neutronSource       // fixed source (source-range floor)
 
         // Deep-shutdown fast path: prompt-jump approximation.
         // With |ρ−β|/Λ ≈ 9000/s the prompt term is ultra-stiff, but n is then
@@ -49,7 +59,7 @@ final class PointKinetics {
             let qsDt   = dt / Double(nQS)
             for _ in 0..<nQS {
                 let src = (0..<6).reduce(0.0) { $0 + lam[$1] * C[$1] }
-                n = src / -rbl
+                n = (src + S) / -rbl
                 for i in 0..<6 {
                     let e = exp(-lam[i] * qsDt)
                     C[i] = C[i] * e + bL[i] * n / lam[i] * (1.0 - e)
@@ -82,13 +92,13 @@ final class PointKinetics {
             for i in 0..<6 { C0[i] = C[i] }
 
             // Stage 1
-            let dn1 = rbl * n0 + (0..<6).reduce(0.0) { $0 + lam[$1] * C0[$1] }
+            let dn1 = rbl * n0 + (0..<6).reduce(0.0) { $0 + lam[$1] * C0[$1] } + S
             for i in 0..<6 { dC1[i] = bL[i] * n0 - lam[i] * C0[i] }
             let nMid = n0 + hdt * dn1
             for i in 0..<6 { Cmid[i] = C0[i] + hdt * dC1[i] }
 
             // Stage 2
-            let dn2 = rbl * nMid + (0..<6).reduce(0.0) { $0 + lam[$1] * Cmid[$1] }
+            let dn2 = rbl * nMid + (0..<6).reduce(0.0) { $0 + lam[$1] * Cmid[$1] } + S
             for i in 0..<6 { dC2[i] = bL[i] * nMid - lam[i] * Cmid[i] }
             n += subDt * dn2
             for i in 0..<6 { C[i] += subDt * dC2[i] }

@@ -32,6 +32,13 @@ struct PlantParams: Sendable {
     // Prompt neutron generation time Λ [s] — ~20 µs for PWR thermal spectrum
     var lambdaPrompt: Double = 2.0e-5
 
+    // Intrinsic/startup neutron source [relative n · s⁻¹]. Holds a source-range
+    // floor when deeply subcritical so the approach to criticality gives real
+    // 1/M behaviour (subcritical multiplication of a fixed source). Utterly
+    // negligible at power — at n≈1 the precursor source is ~3×10² s⁻¹ — so the
+    // validated at-power physics is unchanged.
+    var neutronSource: Double = 1.0e-5
+
     // MARK: — Reactor power
     var nominalPower: Double = 3.0e9          // W (3000 MWt, typical PWR)
 

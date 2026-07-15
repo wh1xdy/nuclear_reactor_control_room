@@ -30,26 +30,37 @@ struct ContentView: View {
         Binding(get: { ReactorType(rawValue: reactorRaw) ?? .pwr }, set: { reactorRaw = $0.rawValue })
     }
     @State private var showSettings = false
+    // Launch screen: pick reactor + start condition before the sim runs.
+    @State private var launched = false
 
     private let speeds = [1, 10, 60, 600]
 
     var body: some View {
         // Resolve the active skin for this build pass before any surface reads it.
         let _ = (Theme.skin = skin)
+        Group {
+            if launched {
+                simView
+            } else {
+                StartMenu(reactor: reactor) { chosen, mode in
+                    reactorRaw = chosen.rawValue
+                    supervisor = PlantSupervisor(kind: chosen.kind, mode: mode)
+                    launched = true
+                    startPhysics()
+                    startKeyMonitor()
+                }
+            }
+        }
+        .background(Theme.bg)
+        .frame(minWidth: 1100, minHeight: 700)
+    }
+
+    private var simView: some View {
         // No root TimelineView — @Observable supervisor drives redraws via the Timer.
         // Scoped TimelineView lives inside PIDCanvas only (flow animation).
         layout
             .id(skin)                       // rebuild only the content subtree on skin switch
             .background(Theme.bg)
-            .frame(minWidth: 1100, minHeight: 700)
-            .onAppear {                     // stable identity — physics/keys start once
-                // Honor a persisted reactor selection from a previous launch.
-                if supervisor.reactorKind != reactor.wrappedValue.kind {
-                    supervisor = PlantSupervisor(kind: reactor.wrappedValue.kind)
-                }
-                startPhysics()
-                startKeyMonitor()
-            }
             .onChange(of: showSettings) { _, open in
                 supervisor.settingsOpen = open      // mimic pauses its canvas behind the sheet
             }
