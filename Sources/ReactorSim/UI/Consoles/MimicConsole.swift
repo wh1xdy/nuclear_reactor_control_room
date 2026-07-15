@@ -128,10 +128,13 @@ private struct MimicControlStrip: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             // ── Faders. ROD and FW have a real auto controller → A/M station. ──
+            // Slider tracks WITHDRAWAL (thumb right = rods out = 228 SWD), so the
+            // handle position matches the printed step count — the raw insertion
+            // fraction (thumb left at full withdrawal) read as a broken control.
             faderAM("ROD DEMAND",
-                    Binding(get: { supervisor.rodPosition },
-                            set: { supervisor.rodPosition = $0; supervisor.rodAutoEnabled = false }),
-                    { "\(Int((228 * (1 - $0)).rounded())) SWD" },
+                    Binding(get: { 1 - supervisor.rodPosition },
+                            set: { supervisor.rodPosition = 1 - $0; supervisor.rodAutoEnabled = false }),
+                    { "\(Int((228 * $0).rounded())) SWD" },
                     auto: Binding(get: { supervisor.rodAutoEnabled }, set: { supervisor.rodAutoEnabled = $0 }))
             // BWR: recirc flow IS the power lever; SMR: natural circulation means
             // there is no flow lever at all (the fader is hidden, not disabled).
