@@ -51,6 +51,16 @@ final class ThermalHydraulics {
         voidFraction = params.nominalVoidFraction       // start at equilibrium void
     }
 
+    /// Isothermal hot standby: whole primary + SG at no-load T-avg, zero ΔT,
+    /// SG at no-load (highest) pressure. The boot state for a cold startup.
+    func setHotStandby() {
+        let avg = params.nominalCoolantTemp             // 550 K
+        tFuel = avg; tHot = avg; tCold = avg; tHL = avg; tCL = avg; tSG = avg
+        electricPower = 0
+        voidFraction = 0
+        steamPressureMPa = ThermalHydraulics.satPressureMPa(avg)
+    }
+
     /// Advance by dt seconds given thermal power P_th [W] and control inputs.
     /// Returns gross electric power [W].
     @discardableResult

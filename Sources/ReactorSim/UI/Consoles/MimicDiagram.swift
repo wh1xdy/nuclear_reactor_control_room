@@ -558,7 +558,8 @@ struct MimicDiagram: View {
         dockField(ctx, r, "ELECTRICAL")
         let gross = snap.electricPowerW / 1e6
         let aux = gross * 0.05
-        let synced = !sup.turbineTrip && !snap.scrammed && gross > 1
+        let onBus = sup.genSynced && !snap.scrammed
+        let synced = onBus && gross > 0.5
         let gcol = synced ? Theme.elecGold : Theme.deEnergized
         // Values band (top) — kept clear of the synchroscope band below.
         var y = r.minY + 20
@@ -589,12 +590,16 @@ struct MimicDiagram: View {
         // climbs into the value rows even as the window shrinks.
         let valuesBottom = r.minY + 78
         let dr = max(12, min(r.width * 0.18, (r.maxY - valuesBottom - 16) / 2))
-        synchroscope(ctx, CGPoint(x: r.midX, y: valuesBottom + dr + 6), dr, synced: synced, t: t)
+        let ready = !sup.genSynced && sup.turbineGen.readyToSync
+        synchroscope(ctx, CGPoint(x: r.midX, y: valuesBottom + dr + 6), dr,
+                     synced: onBus, angleDeg: sup.turbineGen.syncAngleDeg, ready: ready)
     }
 
     /// Generator-paralleling synchroscope: pointer dead-still at 12 o'clock with a
-    /// green lock pip when synchronized; rotates at slip rate otherwise.
-    private func synchroscope(_ ctx: GraphicsContext, _ c: CGPoint, _ rad: CGFloat, synced: Bool, t: Double) {
+    /// green lock pip when synchronized; rotates at the real slip rate otherwise
+    /// (slows to a crawl as the turbine reaches speed — catch it at 12 and close 52G).
+    private func synchroscope(_ ctx: GraphicsContext, _ c: CGPoint, _ rad: CGFloat,
+                              synced: Bool, angleDeg: Double, ready: Bool) {
         ctx.stroke(Path(ellipseIn: CGRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2)),
                    with: .color(Theme.ink.opacity(0.3)), lineWidth: 1)
         for i in 0..<12 {
@@ -603,15 +608,21 @@ struct MimicDiagram: View {
             let p1 = CGPoint(x: c.x + cos(a) * rad * 0.95, y: c.y + sin(a) * rad * 0.95)
             ctx.stroke(Path { p in p.move(to: p0); p.addLine(to: p1) }, with: .color(Theme.ink.opacity(0.2)), lineWidth: 0.5)
         }
-        let ang = synced ? -Double.pi / 2 : (-Double.pi / 2 + t * 0.4 * 2 * .pi).truncatingRemainder(dividingBy: 2 * .pi)
+        // 12 o'clock = in phase (angleDeg 0). Needle sits at 12 when synced,
+        // otherwise points at the live slip angle.
+        let ang = -Double.pi / 2 + (synced ? 0 : angleDeg * .pi / 180)
         let tip = CGPoint(x: c.x + cos(ang) * rad * 0.7, y: c.y + sin(ang) * rad * 0.7)
-        ctx.stroke(Path { p in p.move(to: c); p.addLine(to: tip) },
-                   with: .color(synced ? (Theme.isFlat ? Theme.ink : Theme.statusNormal) : Theme.caution), lineWidth: 1.5)
-        if synced {
-            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - rad - 1, width: 4, height: 4)),
-                     with: .color(Theme.isFlat ? Theme.textHdr : Theme.statusNormal))
-        }
-        ctx.draw(Text("SYNC").font(.system(size: 6, design: .monospaced)).foregroundColor(Theme.textDim),
+        // Amber while hunting, green in the sync window (near 12 & at speed), locked green when on the bus.
+        let inWindow = ready && (abs(angleDeg) < 20 || abs(angleDeg) > 340)
+        let needleCol: Color = synced ? (Theme.isFlat ? Theme.ink : Theme.statusNormal)
+                                      : (inWindow ? (Theme.isFlat ? Theme.ink : Theme.statusNormal) : Theme.caution)
+        ctx.stroke(Path { p in p.move(to: c); p.addLine(to: tip) }, with: .color(needleCol), lineWidth: 1.5)
+        // 12 o'clock lock pip.
+        ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - rad - 1, width: 4, height: 4)),
+                 with: .color(synced || inWindow ? (Theme.isFlat ? Theme.textHdr : Theme.statusNormal) : Theme.ink.opacity(0.3)))
+        let label = synced ? "SYNC" : (ready ? "CLOSE 52G AT 12" : "OFF BUS")
+        ctx.draw(Text(label).font(.system(size: 6, weight: ready && !synced ? .bold : .regular, design: .monospaced))
+                    .foregroundColor(synced ? Theme.textDim : (ready ? Theme.caution : Theme.textDim)),
                  at: CGPoint(x: c.x, y: c.y + rad + 6), anchor: .center)
     }
 
