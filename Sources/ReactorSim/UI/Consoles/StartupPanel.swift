@@ -61,6 +61,7 @@ struct StartupPanel: View {
                 .foregroundStyle(Theme.textHdr)
             row("BORON",  c.boron)
             row("XENON",  c.xenon)
+            row("SAMARIUM", c.sm)
             row("MOD-T",  c.mod)
             row("DOPPLER", c.dop)
             Divider().background(Theme.sep)

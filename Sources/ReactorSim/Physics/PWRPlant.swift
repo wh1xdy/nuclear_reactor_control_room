@@ -30,6 +30,7 @@ struct PlantSnapshot {
     var reactivity:         Double
     var xenonInventory:     Double
     var iodineInventory:    Double
+    var samariumInventory:  Double = 0
     var rodPosition:        Double
     var scrammed:           Bool
     var decayHeatFraction:  Double
@@ -86,8 +87,10 @@ final class ReactorPlant {
         let w = p.rodShape(x)            // calibrated table or integrated-cosine S-curve
         var rho = w * p.rodWorth
         if scrammed { rho += p.scramExtraWorth }
-        rho += p.fuelTempCoeff    * (thermal.tFuel - p.nominalFuelTemp)
-        rho += p.coolantTempCoeff * (thermal.tAvg  - p.nominalCoolantTemp)
+        // Doppler: √T resonance broadening (not linear). Moderator: MTC that
+        // tracks soluble boron (less negative → positive at high boron).
+        rho += p.dopplerReactivity(thermal.tFuel)
+        rho += p.effectiveMTC     * (thermal.tAvg  - p.nominalCoolantTemp)
         // Void feedback (BWR). Referenced to the nominal void so the steady
         // operating point is unchanged; only deviations contribute. Zero for
         // subcooled PWR/SMR (voidCoeff = 0).
@@ -145,6 +148,7 @@ final class ReactorPlant {
             reactivity:        computeReactivity(ctrl),
             xenonInventory:    xenon.X,
             iodineInventory:   xenon.I,
+            samariumInventory: xenon.Sm,
             rodPosition:       rodPosEffective,
             scrammed:          scrammed,
             decayHeatFraction: decayHeat.fraction,
