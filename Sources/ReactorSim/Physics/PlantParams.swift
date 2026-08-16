@@ -92,11 +92,53 @@ struct PlantParams: Sendable {
     var rodSpeed: Double        = 0.0053
 
     // MARK: — Temperature feedback coefficients [Δk/k per K]
-    var fuelTempCoeff: Double    = -2.0e-5    // Doppler, −2 pcm/K
+    var fuelTempCoeff: Double    = -2.0e-5    // Doppler, −2 pcm/K (LOCAL slope at nominal T)
     var coolantTempCoeff: Double = -3.0e-4    // moderator, −20 to −50 pcm/K
     // Boron differential worth [pcm/ppm] (negative). Overridden by the OpenMC
     // calibration when calibration.json is bundled.
     var boronWorthPcmPerPpm: Double = -8.0
+
+    // Moderator-temperature coefficient (MTC) dependence on soluble boron
+    // [ (Δk/k per K) per ppm ]. Soluble boron is a positive poison dissolved in
+    // the moderator: heating the moderator expands it and drives out water AND
+    // its dissolved boron. The boron-removal effect is POSITIVE and offsets the
+    // (negative) spectral-hardening effect, so MTC becomes LESS negative — and
+    // eventually POSITIVE — as boron rises. This is why fresh, highly-borated
+    // cores are run carefully: it is the PWR cousin of the RBMK positive void
+    // coefficient. Zero at the reference boron below, so the calibrated MTC and
+    // the steady operating point are unchanged. ~+0.05 pcm/K per ppm is typical.
+    var mtcBoronSlope: Double     = 5.0e-7
+    var mtcReferenceBoron: Double = 800.0     // ppm where MTC == coolantTempCoeff
+    /// Live soluble-boron concentration [ppm], fed from the supervisor each step
+    /// so the MTC can track it. Defaults to the reference (→ no adjustment) so a
+    /// standalone plant or a test keeps the calibrated MTC.
+    var moderatorBoronPPM: Double = 800.0
+
+    /// Doppler (fuel-temperature) reactivity [Δk/k]. Resonance self-shielding of
+    /// U-238 broadens with temperature roughly as √T, so ρ_D ∝ (√T_f − √T_f0)
+    /// rather than linearly. `fuelTempCoeff` is treated as the SECANT (average)
+    /// coefficient across the power-defect swing — cold no-load fuel (≈ T_cool)
+    /// up to nominal fuel temp — so BOTH endpoints match the old linear model and
+    /// the total power defect is unchanged, while the √T law distributes it
+    /// correctly: the coefficient is STEEPER when the fuel is cold and SHALLOWER
+    /// when hot (the physically correct Doppler behaviour, and the thing you can
+    /// point at and explain). Zero at nominal fuel temp, so the calibrated value
+    /// and the steady operating point are exactly preserved.
+    func dopplerReactivity(_ tFuel: Double) -> Double {
+        let t   = max(1.0, tFuel)
+        let tHot = nominalFuelTemp
+        let tCold = nominalCoolantTemp                 // fuel ≈ coolant at no load
+        // α·(√tHot − √tCold) = fuelTempCoeff·(tHot − tCold)  ⇒  endpoints match linear.
+        let denom = sqrt(tHot) - sqrt(tCold)
+        let alpha = fuelTempCoeff * (tHot - tCold) / (denom == 0 ? 1 : denom)
+        return alpha * (sqrt(t) - sqrt(tHot))
+    }
+
+    /// Effective moderator-temperature coefficient at the current boron [Δk/k/K].
+    var effectiveMTC: Double {
+        guard hasBoron else { return coolantTempCoeff }
+        return coolantTempCoeff + mtcBoronSlope * (moderatorBoronPPM - mtcReferenceBoron)
+    }
 
     // Optional OpenMC-derived integral rod-worth SHAPE (normalized 0…1 over
     // insertion 0…1). The TOTAL bank worth stays `rodWorth` — a single rodded
@@ -145,6 +187,21 @@ struct PlantParams: Sendable {
     var lambdaXe: Double        = 0.6931 / (9.17 * 3600)   // Xe-135 decay [1/s]
     var xenonBurnCoeff: Double  = 2.1e-5      // σ_a(Xe)·φ at full power [1/s]
     var xenonReactivityCoeff: Double = 1.6e-5 // maps Xe inventory → Δk/k
+
+    // MARK: — Promethium-149 / Samarium-149 dynamics
+    // The OTHER shutdown poison. Chain: fission → Pm-149 →(β, 53 h)→ Sm-149,
+    // which is STABLE and removed only by neutron capture (σ_a ≈ 4·10⁴ b). Two
+    // properties make it worth teaching alongside xenon:
+    //   • Equilibrium Sm worth is FLUX-INDEPENDENT (Sm_eq = γ_Pm/σ_aφ · … cancels
+    //     the flux), unlike xenon's flux-dependent peak.
+    //   • After shutdown the Pm bank keeps decaying into Sm with no burnup, so Sm
+    //     grows to a PERMANENT higher level ("dead samarium") that xenon — which
+    //     decays away — cannot explain.
+    var pmYield: Double         = 0.011                       // Pm-149 effective fission yield (~1.08%)
+    var lambdaPm: Double        = 0.6931 / (53.08 * 3600)     // Pm-149 decay [1/s], t½ = 53.08 h
+    var smBurnCoeff: Double     = 1.6e-6      // σ_a(Sm)·φ at full power [1/s]
+    var smReactivityCoeff: Double = 9.5e-7    // maps Sm inventory → Δk/k
+                                              // (equilibrium ≈ −650 pcm)
 
     // MARK: — Nominal operating temperatures [K]
     var nominalFuelTemp: Double    = 900.0

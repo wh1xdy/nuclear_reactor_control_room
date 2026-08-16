@@ -35,6 +35,154 @@ final class DecayHeatTests: XCTestCase {
     }
 }
 
+final class KineticsTests: XCTestCase {
+
+    /// Solve the inhour equation ρ = Λω + Σ β_i·ω/(ω+λ_i) for the stable
+    /// (positive) root ω = 1/T given a reactivity insertion ρ. RHS is strictly
+    /// increasing in ω for ω>0, so a bisection converges to the unique root.
+    private func inhourOmega(rho: Double, _ p: PlantParams) -> Double {
+        func rhs(_ w: Double) -> Double {
+            var r = p.lambdaPrompt * w
+            for i in 0..<p.beta.count { r += p.beta[i] * w / (w + p.lambdaD[i]) }
+            return r
+        }
+        var lo = 0.0, hi = 10.0
+        for _ in 0..<100 {
+            let mid = (lo + hi) / 2
+            if rhs(mid) < rho { lo = mid } else { hi = mid }
+        }
+        return (lo + hi) / 2
+    }
+
+    /// The point-kinetics integrator must reproduce the analytical asymptotic
+    /// reactor period. Insert a small step (well below prompt-critical) into a
+    /// critical core, let the fast transient modes die, then measure the stable
+    /// period and compare with the inhour equation. This verifies the NUMERICS,
+    /// not just system behaviour.
+    func testAsymptoticPeriodMatchesInhour() {
+        let p  = PlantParams()
+        let pk = PointKinetics(p)                     // boots critical (ρ=0, n=1)
+        let rho = 1.0e-3                              // +100 pcm, delayed-critical
+
+        // Advance 60 s so only the fundamental mode survives.
+        var t = 0.0
+        while t < 60.0 { pk.step(dt: 0.05, rho: rho); t += 0.05 }
+        let n1 = pk.n
+        while t < 120.0 { pk.step(dt: 0.05, rho: rho); t += 0.05 }
+        let n2 = pk.n
+
+        let omegaMeasured = log(n2 / n1) / 60.0
+        let omegaTheory   = inhourOmega(rho: rho, p)
+
+        XCTAssertGreaterThan(n2, n1, "supercritical step must grow the flux")
+        XCTAssertEqual(omegaMeasured, omegaTheory, accuracy: omegaTheory * 0.03,
+                       "asymptotic period (T=\(1/omegaMeasured)s) must match inhour (T=\(1/omegaTheory)s)")
+    }
+
+    /// A negative step must give a stable NEGATIVE period bounded by the longest-
+    /// lived precursor group (ω → −λ_min as ρ → −∞); the flux decays.
+    func testNegativeStepDecaysAndTracksInhour() {
+        let p  = PlantParams()
+        let pk = PointKinetics(p)
+        let rho = -1.0e-3
+
+        // A negative step needs a longer settle: the second mode (≈ −0.025/s,
+        // τ ≈ 40 s) must decay away before the least-negative fundamental shows.
+        var t = 0.0
+        while t < 200.0 { pk.step(dt: 0.05, rho: rho); t += 0.05 }
+        let n1 = pk.n
+        while t < 320.0 { pk.step(dt: 0.05, rho: rho); t += 0.05 }
+        let n2 = pk.n
+        XCTAssertLessThan(n2, n1, "negative step must shrink the flux")
+
+        // Negative-ρ inhour root is negative; solve on ω∈(−λ_min, 0).
+        let lamMin = p.lambdaD.min()!
+        func rhs(_ w: Double) -> Double {
+            var r = p.lambdaPrompt * w
+            for i in 0..<p.beta.count { r += p.beta[i] * w / (w + p.lambdaD[i]) }
+            return r
+        }
+        // rhs is strictly increasing in ω, so root of rhs(ω)=ρ: go right when low.
+        var lo = -lamMin + 1e-6, hi = 0.0
+        for _ in 0..<100 { let m = (lo+hi)/2; if rhs(m) < rho { lo = m } else { hi = m } }
+        let omegaTheory = (lo + hi) / 2
+        let omegaMeasured = log(n2 / n1) / 120.0
+        XCTAssertEqual(omegaMeasured, omegaTheory, accuracy: abs(omegaTheory) * 0.04,
+                       "asymptotic negative period (T=\(1/omegaMeasured)s) must match inhour (T=\(1/omegaTheory)s)")
+    }
+}
+
+final class FeedbackAndPoisonTests: XCTestCase {
+
+    /// Doppler is √T, not linear: the coefficient is STEEPER cold and SHALLOWER
+    /// hot, yet the calibration endpoints (no-load 550 K and full-power 900 K)
+    /// still match the linear power defect exactly.
+    func testDopplerSqrtTShape() {
+        let p = PlantParams()
+        // Endpoints pinned to the linear model.
+        XCTAssertEqual(p.dopplerReactivity(p.nominalFuelTemp), 0, accuracy: 1e-9)
+        XCTAssertEqual(p.dopplerReactivity(p.nominalCoolantTemp),
+                       p.fuelTempCoeff * (p.nominalCoolantTemp - p.nominalFuelTemp),
+                       accuracy: 1e-9)
+        // Local slope: steeper (more negative) cold than hot.
+        let d = 1.0
+        let slopeCold = (p.dopplerReactivity(600 + d) - p.dopplerReactivity(600 - d)) / (2*d)
+        let slopeHot  = (p.dopplerReactivity(900 + d) - p.dopplerReactivity(900 - d)) / (2*d)
+        XCTAssertLessThan(slopeCold, slopeHot)          // more negative when cold
+        XCTAssertLessThan(slopeHot, 0)                  // still negative at power
+    }
+
+    /// MTC tracks soluble boron: less negative as boron rises, and positive at
+    /// high enough boron (the PWR cousin of the RBMK positive void coefficient).
+    func testMTCTracksBoron() {
+        var p = PlantParams()
+        p.moderatorBoronPPM = 800;  let mtcRef  = p.effectiveMTC
+        p.moderatorBoronPPM = 1600; let mtcHigh = p.effectiveMTC
+        p.moderatorBoronPPM = 200;  let mtcLow  = p.effectiveMTC
+        XCTAssertEqual(mtcRef, p.coolantTempCoeff, accuracy: 1e-12)   // reference unchanged
+        XCTAssertGreaterThan(mtcHigh, mtcRef)                         // less negative high boron
+        XCTAssertLessThan(mtcLow, mtcRef)                             // more negative low boron
+        // With base MTC ≈ −18 pcm/K and +0.05 pcm/K/ppm, ~2000 ppm above ref
+        // flips it positive.
+        p.moderatorBoronPPM = 800 + 4000
+        XCTAssertGreaterThan(p.effectiveMTC, 0, "MTC must be able to go positive at high boron")
+    }
+
+    /// Equilibrium samarium worth is FLUX-INDEPENDENT: run to Sm equilibrium at
+    /// two power levels and the reactivity converges to the same value.
+    func testSamariumEquilibriumIsFluxIndependent() {
+        let p = PlantParams()
+        func smReactivityAtEquilibrium(_ n: Double) -> Double {
+            let xi = XenonIodine(p)
+            // Sm's approach τ ≈ 1/(σφ·n), so low flux converges slower — run long
+            // enough (≈115 days) that even n=0.5 is fully settled.
+            for _ in 0..<50000 { xi.step(dt: 200, n: n) }
+            return -p.smReactivityCoeff * xi.Sm
+        }
+        let full = smReactivityAtEquilibrium(1.0)
+        let half = smReactivityAtEquilibrium(0.5)
+        XCTAssertLessThan(full, -0.003)                        // meaningful poison (~ -650 pcm)
+        XCTAssertEqual(full, half, accuracy: abs(full) * 0.02) // flux-independent
+    }
+
+    /// Post-shutdown samarium is PERMANENT and GROWS: the promethium bank keeps
+    /// decaying into Sm with no burnup, so Sm climbs and never falls (unlike
+    /// xenon, which decays away).
+    func testSamariumGrowsAfterShutdown() {
+        let p  = PlantParams()
+        let xi = XenonIodine(p)
+        for _ in 0..<20000 { xi.step(dt: 200, n: 1.0) }        // reach equilibrium
+        let smAtTrip = xi.Sm
+        for _ in 0..<20000 { xi.step(dt: 200, n: 0.0) }        // shut down, wait
+        let smDead = xi.Sm
+        XCTAssertGreaterThan(smDead, smAtTrip, "dead samarium must build after shutdown")
+        // And it never decays back out (Sm is stable, no burn at n=0).
+        let smBefore = xi.Sm
+        for _ in 0..<20000 { xi.step(dt: 200, n: 0.0) }
+        XCTAssertEqual(xi.Sm, smBefore, accuracy: smBefore * 1e-6)
+    }
+}
+
 final class PlantTests: XCTestCase {
 
     /// Steady full power: 10 sim-minutes at nominal controls.

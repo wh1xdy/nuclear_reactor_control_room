@@ -206,6 +206,9 @@ private struct ReactivityReadoutsPanel: View {
                 readRow("XE-135 INV",    String(format: "%7.1f rel", s.xenonInventory), Theme.text)
                 readRow("I-135 INV",     String(format: "%7.1f rel", s.iodineInventory), Theme.textDim)
                 readRow("XENON WORTH",   String(format: "%+7.0f pcm", s.xenonInventory * -1.6e-5 * 1e5), Theme.text)
+                // Samarium: the other, PERMANENT shutdown poison (model coeff 9.5e-7).
+                readRow("SM-149 INV",    String(format: "%7.1f rel", s.samariumInventory), Theme.textDim)
+                readRow("SAMARIUM WORTH", String(format: "%+7.0f pcm", s.samariumInventory * -9.5e-7 * 1e5), Theme.text)
                 readRow("DECAY HEAT",    String(format: "%7.3f %%", s.decayHeatFraction * 100),
                         s.decayHeatFraction > 0.03 ? Theme.caution : Theme.text)
                 readRow("RODS D-BANK",   String(format: "%4d SWD", Int((228 * (1 - s.rodPosition)).rounded())), Theme.text)

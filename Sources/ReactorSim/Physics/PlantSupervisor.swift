@@ -549,11 +549,17 @@ final class PlantSupervisor {
                         // high-flux trip (a wide-open ramp from a low-power sync
                         // overshoots to ~120 %).
                         startupPhase = "POWER ASCENSION — RAMPING TURBINE"
-                        // Ramp the throttle fully open, pausing whenever power is
-                        // climbing fast (rate brake) so the reactor tracks the
-                        // steam demand without riding the period into a trip.
-                        if turbineValve < 0.999 && _rate.dPw < 0.20 {
-                            turbineValve = min(1.0, turbineValve + 0.0025 * dt)
+                        // Slave the throttle to ACTUAL power plus a small lead, so
+                        // the steam demand never gets far enough ahead of the
+                        // reactor to overshoot the flux trip. (The √T Doppler
+                        // correctly SOFTENS at high fuel temp, so the reactor no
+                        // longer self-arrests a wide-open ramp as hard — and near
+                        // ARO the rods sit on the flat top of the S-curve, so the
+                        // flux limiter has little differential worth to bite with.
+                        // Creeping open behind the power is the robust ascent.)
+                        let lead = min(1.0, pf + 0.10)
+                        if turbineValve < lead && _rate.dPw < 0.30 {
+                            turbineValve = min(lead, turbineValve + 0.0025 * dt)
                         }
                         if turbineValve >= 0.999 && pf >= 0.95 {
                             startupPhase = "AT POWER — SEQ COMPLETE"
@@ -735,6 +741,10 @@ final class PlantSupervisor {
         let vPrimary = 300.0   // m³ approximate primary coolant volume
         let dB = (borationRate * 150.0 - dilutionRate * boronPPM) / vPrimary * dt
         boronPPM = max(0, boronPPM + dB)
+        // Feed the live boron to the plant so the moderator-temp coefficient can
+        // track it (MTC less negative / positive at high boron — the RBMK-cousin
+        // feedback the operator must respect when heavily borated).
+        plant.params.moderatorBoronPPM = boronPPM
         // Differential boron worth from PlantParams (OpenMC-calibrated when
         // calibration.json is bundled); nominal 800 ppm → 0 reactivity.
         plant.params.externalReactivity = plant.params.boronWorthPcmPerPpm * 1e-5 * (boronPPM - 800.0) + malfRho
@@ -916,12 +926,13 @@ final class PlantSupervisor {
     func rodWorthShape(_ x: Double) -> Double { plant.params.rodShape(x) }
 
     /// Reactivity components [Δk/k] for the ECP block.
-    var rhoComponents: (boron: Double, xenon: Double, mod: Double, dop: Double) {
+    var rhoComponents: (boron: Double, xenon: Double, sm: Double, mod: Double, dop: Double) {
         let p = plant.params
         return (p.externalReactivity,
                 -p.xenonReactivityCoeff * snapshot.xenonInventory,
-                p.coolantTempCoeff * (snapshot.coolantTempK - p.nominalCoolantTemp),
-                p.fuelTempCoeff * (snapshot.fuelTempK - p.nominalFuelTemp))
+                -p.smReactivityCoeff * snapshot.samariumInventory,
+                p.effectiveMTC * (snapshot.coolantTempK - p.nominalCoolantTemp),
+                p.dopplerReactivity(snapshot.fuelTempK))
     }
 
     /// Estimated critical position [SWD], from inverting the rod S-curve
@@ -930,7 +941,7 @@ final class PlantSupervisor {
     var ecpSWD: Int? {
         let p = plant.params
         let c = rhoComponents
-        let others = c.boron + c.xenon + c.mod + c.dop
+        let others = c.boron + c.xenon + c.sm + c.mod + c.dop
         let wNeeded = others / -p.rodWorth        // rodWorth < 0
         guard wNeeded >= 0 else { return 228 }    // excess without rods → out
         guard wNeeded <= 1 else { return nil }    // even fully inserted can't... precluded end
