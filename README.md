@@ -86,4 +86,4 @@ worth), and the switchyard breakers to operate them.
 
 ---
 
-*Training simulator — not for real-plant use.*
+*Training simulator — not for real-plant use. Built together with AI.*
