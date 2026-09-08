@@ -1,7 +1,6 @@
 # ReactorSim — Session Recap
 
 **Project:** Native macOS SwiftUI nuclear reactor (PWR) training simulator.
-**Dir:** `/Users/alexanderwessbladhardh/kärnreaktor/ReactorSim/`
 **Repo:** github.com/wh1xdy/nuclear_reactor_control_room (branch `macos-swift`).
 **Build:** `swift build` (debug) / `swift build -c release` (release for 600× speed).
 **Test:** `swift test` — 22 headless tests, all passing (2026-07-02).
