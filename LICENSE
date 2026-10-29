@@ -1,19 +1,35 @@
-Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International
+Copyright (c) 2026 Alexander Wessblad Hårdh (wh1xdy)
 
-This work is licensed under the Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
-To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-nd/4.0/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
-
-TERMS OF USE:
+This repository and its contents (source code, assets, and documentation)
+are the property of the copyright holder.
 
 You are free to:
-- Share — copy and redistribute the material in any medium or format
+  - Read, study, and learn from the source code
+  - Clone or fork the repository for your own private, non-commercial use
+  - Build and run the software for your own private, non-commercial use
 
-Under the following terms:
-- Attribution — You must give appropriate credit, provide a link to the license, and indicate if changes were made.
-- NonCommercial — You may not use the material for commercial purposes.
-- NoDerivatives — If you remix, transform, or build upon the material, you may not distribute the modified material.
+You may not, without the copyright holder's prior written permission:
+  - Use this software, in whole or in part, for commercial purposes
+  - Distribute, publish, or share modified versions of this software
+  - Remove or obscure attribution to the original author
 
-No additional restrictions — You may not apply legal terms or technological measures that legally restrict others from doing anything the license permits.
+Any permitted use, copy, or reference to this software must retain
+attribution to the original author, Alexander Wessblad Hårdh (wh1xdy),
+with a link to the original repository.
 
-This nuclear reactor control room simulation is the intellectual property of the original author.
-Any use not permitted under these terms requires explicit written permission from the copyright holder.
+To request permission for commercial use, or to distribute a modified
+version, contact the copyright holder.
+
+NOT A CERTIFIED TRAINING TOOL: This software is a simulation built for
+educational and entertainment purposes. It is not a certified or
+validated training tool for nuclear plant operators and must not be
+used as a substitute for professional, accredited reactor operator
+training or qualification. The simulation models are approximations
+and may not reflect the behavior of any real reactor design.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY ARISING FROM THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
