@@ -7,18 +7,40 @@ You are free to:
   - Read, study, and learn from the source code
   - Clone or fork the repository for your own private, non-commercial use
   - Build and run the software for your own private, non-commercial use
+  - Submit contributions (pull requests) back to this repository
+
+Contributions submitted via pull request are welcome. By submitting one,
+you agree it may be included in this project under these same terms,
+and you keep attribution for your own contribution.
 
 You may not, without the copyright holder's prior written permission:
   - Use this software, in whole or in part, for commercial purposes
-  - Distribute, publish, or share modified versions of this software
+  - Publish or distribute a modified version of this software anywhere
+    other than as a pull request back to this repository
   - Remove or obscure attribution to the original author
+  - Use this software, in whole or in part, to train, fine-tune, or
+    evaluate any machine learning or AI model
 
 Any permitted use, copy, or reference to this software must retain
 attribution to the original author, Alexander Wessblad Hårdh (wh1xdy),
 with a link to the original repository.
 
-To request permission for commercial use, or to distribute a modified
-version, contact the copyright holder.
+To request permission for commercial use, AI/ML training use, or to
+distribute a modified version elsewhere, contact the copyright holder.
+
+TERMINATION: This license and all rights granted under it terminate
+automatically and immediately if you breach any of its terms. Rights
+are not reinstated until the copyright holder grants them again in
+writing.
+
+PATENTS: If you (or an entity you control) bring a patent infringement
+claim against the copyright holder alleging that this software, or a
+contribution to it, infringes a patent, then any license granted to
+you under these terms terminates immediately as of the date such claim
+is filed.
+
+GOVERNING LAW: This license is governed by the laws of Sweden, without
+regard to conflict-of-law principles.
 
 NOT A CERTIFIED TRAINING TOOL: This software is a simulation built for
 educational and entertainment purposes. It is not a certified or
